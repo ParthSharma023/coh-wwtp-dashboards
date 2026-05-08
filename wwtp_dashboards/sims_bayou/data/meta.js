@@ -1,0 +1,1 @@
+window.__wwtp_meta={"plant":"Sims Bayou WWTP","fid":"0183","years":[2015,2016,2017,2018,2019,2020,2021,2022,2023,2024,2025,2026],"pumps":["DYN101E","DYN101W","DYN102E","DYN102W","DYN103E","DYN103W"]};

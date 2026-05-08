@@ -1,0 +1,159 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Houston WWTP Dashboards</title>
+  <link rel="stylesheet" href="./styles.css" />
+  <style>
+    .landing-header {
+      padding: 32px 32px 24px;
+      border-bottom: 1px solid rgba(122,156,199,0.12);
+    }
+    .landing-header h1 { margin: 0; font-size: 32px; font-weight: 700; }
+    .landing-header p  { margin: 8px 0 0; color: var(--muted); font-size: 15px; }
+    .plant-grid {
+      display: grid;
+      grid-template-columns: repeat(auto-fill, minmax(260px, 1fr));
+      gap: 16px;
+      padding: 28px 32px;
+    }
+    .plant-card {
+      display: block; text-decoration: none;
+      background: linear-gradient(180deg, rgba(26,39,57,0.96), rgba(20,31,47,0.96));
+      border: 1px solid var(--border);
+      border-radius: 16px;
+      padding: 22px 22px 18px;
+      box-shadow: var(--shadow);
+      transition: border-color 0.18s, transform 0.18s;
+    }
+    .plant-card:hover {
+      border-color: rgba(72,208,201,0.5);
+      transform: translateY(-2px);
+    }
+    .plant-card-fid {
+      font-size: 12px; font-weight: 700; letter-spacing: 0.06em;
+      color: #48d0c9; margin-bottom: 8px; text-transform: uppercase;
+    }
+    .plant-card-name {
+      font-size: 18px; font-weight: 700; color: var(--text); margin-bottom: 10px;
+    }
+    .plant-card-meta {
+      font-size: 13px; color: var(--muted);
+    }
+  </style>
+</head>
+<body>
+  <div class="landing-header">
+    <h1>Houston WWTP Dashboards</h1>
+    <p>SCADA Historical · WWLevel, Effluent Flow &amp; Pump Status</p>
+  </div>
+  <div class="plant-grid">
+      <a class="plant-card" href="./69th_street/index.html">
+        <div class="plant-card-fid">FID 0400</div>
+        <div class="plant-card-name">69th Street WWTP</div>
+        <div class="plant-card-meta">2015–2026</div>
+      </a>
+      <a class="plant-card" href="./northeast/index.html">
+        <div class="plant-card-fid">FID 0146</div>
+        <div class="plant-card-name">Northeast WWTP</div>
+        <div class="plant-card-meta">2015–2026</div>
+      </a>
+      <a class="plant-card" href="./almeda_sims/index.html">
+        <div class="plant-card-fid">FID 0006</div>
+        <div class="plant-card-name">Almeda Sims WWTP</div>
+        <div class="plant-card-meta">2015–2026</div>
+      </a>
+      <a class="plant-card" href="./fwsd_23/index.html">
+        <div class="plant-card-fid">FID 0083</div>
+        <div class="plant-card-name">F.W.S.D. #23 WWTP</div>
+        <div class="plant-card-meta">2015–2026</div>
+      </a>
+      <a class="plant-card" href="./willowbrook/index.html">
+        <div class="plant-card-fid">FID 0469</div>
+        <div class="plant-card-name">Willowbrook WWTP</div>
+        <div class="plant-card-meta">2015–2026</div>
+      </a>
+      <a class="plant-card" href="./cedar_bayou/index.html">
+        <div class="plant-card-fid">FID 0244</div>
+        <div class="plant-card-name">Cedar Bayou WWTP</div>
+        <div class="plant-card-meta">2015–2026</div>
+      </a>
+      <a class="plant-card" href="./chocolate_bayou/index.html">
+        <div class="plant-card-fid">FID 0039</div>
+        <div class="plant-card-name">Chocolate Bayou WWTP</div>
+        <div class="plant-card-meta">2015–2026</div>
+      </a>
+      <a class="plant-card" href="./clinton_park/index.html">
+        <div class="plant-card-fid">FID 0040</div>
+        <div class="plant-card-name">Clinton Park WWTP</div>
+        <div class="plant-card-meta">2015–2026</div>
+      </a>
+      <a class="plant-card" href="./sagemont/index.html">
+        <div class="plant-card-fid">FID 0171</div>
+        <div class="plant-card-name">Sagemont WWTP</div>
+        <div class="plant-card-meta">2015–2026</div>
+      </a>
+      <a class="plant-card" href="./southeast/index.html">
+        <div class="plant-card-fid">FID 0189</div>
+        <div class="plant-card-name">Southeast WWTP</div>
+        <div class="plant-card-meta">2015–2026</div>
+      </a>
+      <a class="plant-card" href="./southwest/index.html">
+        <div class="plant-card-fid">FID 0190</div>
+        <div class="plant-card-name">S.W. Treatment Plant</div>
+        <div class="plant-card-meta">2015–2026</div>
+      </a>
+      <a class="plant-card" href="./sims_bayou/index.html">
+        <div class="plant-card-fid">FID 0183</div>
+        <div class="plant-card-name">Sims Bayou WWTP</div>
+        <div class="plant-card-meta">2015–2026</div>
+      </a>
+      <a class="plant-card" href="./northbelt/index.html">
+        <div class="plant-card-fid">FID 0252</div>
+        <div class="plant-card-name">Northbelt WWTP</div>
+        <div class="plant-card-meta">2015–2026</div>
+      </a>
+      <a class="plant-card" href="./northwest/index.html">
+        <div class="plant-card-fid">FID 0145</div>
+        <div class="plant-card-name">Northwest WWTP</div>
+        <div class="plant-card-meta">2015–2026</div>
+      </a>
+      <a class="plant-card" href="./homestead/index.html">
+        <div class="plant-card-fid">FID 0107</div>
+        <div class="plant-card-name">Homestead WWTP</div>
+        <div class="plant-card-meta">2015–2026</div>
+      </a>
+      <a class="plant-card" href="./easthaven/index.html">
+        <div class="plant-card-fid">FID 0059</div>
+        <div class="plant-card-name">Easthaven WWTP</div>
+        <div class="plant-card-meta">2015–2026</div>
+      </a>
+      <a class="plant-card" href="./beltway/index.html">
+        <div class="plant-card-fid">FID 0242</div>
+        <div class="plant-card-name">Beltway WWTP</div>
+        <div class="plant-card-meta">2015–2026</div>
+      </a>
+      <a class="plant-card" href="./west_district/index.html">
+        <div class="plant-card-fid">FID 0237</div>
+        <div class="plant-card-name">West District WWTP</div>
+        <div class="plant-card-meta">2015–2026</div>
+      </a>
+      <a class="plant-card" href="./greenridge/index.html">
+        <div class="plant-card-fid">FID 0240</div>
+        <div class="plant-card-name">Greenridge WWTP</div>
+        <div class="plant-card-meta">2015–2026</div>
+      </a>
+      <a class="plant-card" href="./metro_central/index.html">
+        <div class="plant-card-fid">FID 0397</div>
+        <div class="plant-card-name">Metro Central WWTP</div>
+        <div class="plant-card-meta">2015–2026</div>
+      </a>
+      <a class="plant-card" href="./turkey_creek/index.html">
+        <div class="plant-card-fid">FID 0201</div>
+        <div class="plant-card-name">Turkey Creek WWTP</div>
+        <div class="plant-card-meta">2015–2026</div>
+      </a>
+  </div>
+</body>
+</html>

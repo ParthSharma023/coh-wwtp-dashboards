@@ -1,0 +1,30 @@
+{
+  "plant": "Homestead WWTP",
+  "fid": "0107",
+  "years": [
+    2015,
+    2016,
+    2017,
+    2018,
+    2019,
+    2020,
+    2021,
+    2022,
+    2023,
+    2024,
+    2025,
+    2026
+  ],
+  "pumps": [
+    "DYN101",
+    "DYN102",
+    "DYN103",
+    "DYN104",
+    "DYN105",
+    "SS0X992A.XT0145DYN107.F_CV",
+    "SS0X992A.XT0190DYN107.F_CV",
+    "SS0X992A.XT0237DYN107.F_CV",
+    "SS0X992A.XT0252DYN107.F_CV",
+    "SS0X992A.XT0286DYN107.F_CV"
+  ]
+}

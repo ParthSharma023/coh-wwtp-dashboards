@@ -1,0 +1,30 @@
+{
+  "plant": "Willowbrook WWTP",
+  "fid": "0469",
+  "years": [
+    2015,
+    2016,
+    2017,
+    2018,
+    2019,
+    2020,
+    2021,
+    2022,
+    2023,
+    2024,
+    2025,
+    2026
+  ],
+  "pumps": [
+    "DYN101",
+    "DYN102",
+    "DYN103",
+    "DYN104",
+    "DYN105",
+    "LS_PMP1_JIS1",
+    "LS_PMP2_JIS1",
+    "LS_PMP3_JIS1",
+    "LS_PMP4_JIS1",
+    "LS_PMP5_JIS1"
+  ]
+}

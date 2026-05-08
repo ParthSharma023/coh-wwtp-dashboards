@@ -1,0 +1,30 @@
+{
+  "plant": "Almeda Sims WWTP",
+  "fid": "0006",
+  "years": [
+    2015,
+    2016,
+    2017,
+    2018,
+    2019,
+    2020,
+    2021,
+    2022,
+    2023,
+    2024,
+    2025,
+    2026
+  ],
+  "pumps": [
+    "ADP1",
+    "ADP2",
+    "AELS_DP1",
+    "AELS_DP2",
+    "AELS_WP1",
+    "AELS_WP2",
+    "AELS_WP3",
+    "AWP1",
+    "AWP2",
+    "AWP3"
+  ]
+}

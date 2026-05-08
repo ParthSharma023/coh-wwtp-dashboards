@@ -41,7 +41,7 @@ Run for all plants:
 
 Then commit and push. City laptop pulls and copies to E: drive.
 
-## Plants Built (21)
+## Plants Built (26)
 
 | FID | Plant | Notes |
 |-----|-------|-------|
@@ -67,8 +67,14 @@ Then commit and push. City laptop pulls and copies to E: drive.
 | 0397 | Metro Central WWTP | |
 | 0201 | Turkey Creek WWTP | |
 
-## Remaining Plants (~15 more buildable)
+| 0268 | Imperial Valley WWTP | |
+| 0250 | Keegan's Bayou WWTP | |
+| 0485 | W.C.I.D. #76 WWTP | |
+| 0398 | Westway MUD WWTP | |
+| 0451 | MC MUD #48 WWTP | |
 
-Imperial Valley (0268), Keegan's Bayou (0250), W.C.I.D. #76 (0485), Westway MUD (0398), MC MUD #48 (0451), Northgate (0270), M.U.D. #203 (0243), White Oak (0274), Park Ten (0245), Intercontinental Airport (0238), WCID #47 (0225), W.C.I.D. #111 (0279), Upper Brays (0286), Forest Cove (0565+0566 — dual FID), Tidwell Timbers (0498 — pump/wwl under 0499)
+## Remaining Plants (~10 more buildable)
+
+Northgate (0270), M.U.D. #203 (0243), White Oak (0274), Park Ten (0245), Intercontinental Airport (0238), WCID #47 (0225), W.C.I.D. #111 (0279), Upper Brays (0286), Forest Cove (0565+0566 — dual FID), Tidwell Timbers (0498 — pump/wwl under 0499)
 
 **Not buildable:** Kingwood Central (0518), West Lake Houston (0627) — no pump or wwl data.

@@ -55,6 +55,12 @@ PLANTS = [
     ("0240", "Greenridge WWTP",       "greenridge",        None,    None),
     ("0397", "Metro Central WWTP",    "metro_central",     None,    None),
     ("0201", "Turkey Creek WWTP",     "turkey_creek",      None,    None),
+    # Batch 3
+    ("0268", "Imperial Valley WWTP",  "imperial_valley",   None,    None),
+    ("0250", "Keegan's Bayou WWTP",   "keegans_bayou",     None,    None),
+    ("0485", "W.C.I.D. #76 WWTP",    "wcid_76",           None,    None),
+    ("0398", "Westway MUD WWTP",      "westway_mud",       None,    None),
+    ("0451", "MC MUD #48 WWTP",       "mc_mud_48",         None,    None),
 ]
 # ─────────────────────────────────────────────────────────────────────────────
 

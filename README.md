@@ -1,0 +1,74 @@
+# CoH WWTP SCADA Dashboards
+
+Static web dashboards for City of Houston Wastewater Treatment Plants. Visualizes historical SCADA data (effluent flow, wet well level, pump status) from 2015–present. Replaces Power BI reports — no license, no server, opens directly from the E: drive.
+
+## E: Drive Deployment
+
+**Destination path:**
+```
+E:\workspace_cohww\workspace_cohww_wwip\wwip_team_projects\Parth\wwtp_dashboards\
+```
+
+**To update (city laptop):**
+1. `git pull`
+2. Copy the `wwtp_dashboards/` folder to the path above
+
+## Data Source
+
+Parquet files on S3:
+```
+s3://aventdtlkps3stg01/published/scada/summaries/archived/wwtp_wwl_pumpstatus_flow_consolidated/wwtp_flow_wwl_pumps_corrected/
+```
+FID-to-plant-name mapping: `WWTP_Status_Report.xlsx` in the same S3 prefix.
+
+## Adding / Updating Plants (personal Mac only)
+
+Requires Python venv with pandas, pyarrow, s3fs:
+```
+python3 -m venv /tmp/wwtp_env
+/tmp/wwtp_env/bin/pip install pandas pyarrow s3fs
+```
+
+Run for a single plant:
+```
+/tmp/wwtp_env/bin/python3 preprocess.py --fid 0469
+```
+
+Run for all plants:
+```
+/tmp/wwtp_env/bin/python3 preprocess.py
+```
+
+Then commit and push. City laptop pulls and copies to E: drive.
+
+## Plants Built (21)
+
+| FID | Plant | Notes |
+|-----|-------|-------|
+| 0400 | 69th Street WWTP | Pump tagnames use "400" not "0400" |
+| 0146 | Northeast WWTP | |
+| 0006 | Almeda Sims WWTP | Pump data under FID 0005 |
+| 0083 | F.W.S.D. #23 WWTP | |
+| 0469 | Willowbrook WWTP | |
+| 0244 | Cedar Bayou WWTP | |
+| 0039 | Chocolate Bayou WWTP | |
+| 0040 | Clinton Park WWTP | |
+| 0171 | Sagemont WWTP | |
+| 0189 | Southeast WWTP | |
+| 0190 | S.W. Treatment Plant | |
+| 0183 | Sims Bayou WWTP | |
+| 0252 | Northbelt WWTP | |
+| 0145 | Northwest WWTP | |
+| 0107 | Homestead WWTP | |
+| 0059 | Easthaven WWTP | |
+| 0242 | Beltway WWTP | |
+| 0237 | West District WWTP | S3 write blocked — deploy via GitHub only |
+| 0240 | Greenridge WWTP | |
+| 0397 | Metro Central WWTP | |
+| 0201 | Turkey Creek WWTP | |
+
+## Remaining Plants (~15 more buildable)
+
+Imperial Valley (0268), Keegan's Bayou (0250), W.C.I.D. #76 (0485), Westway MUD (0398), MC MUD #48 (0451), Northgate (0270), M.U.D. #203 (0243), White Oak (0274), Park Ten (0245), Intercontinental Airport (0238), WCID #47 (0225), W.C.I.D. #111 (0279), Upper Brays (0286), Forest Cove (0565+0566 — dual FID), Tidwell Timbers (0498 — pump/wwl under 0499)
+
+**Not buildable:** Kingwood Central (0518), West Lake Houston (0627) — no pump or wwl data.

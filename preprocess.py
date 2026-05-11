@@ -27,40 +27,55 @@ USE_S3     = True
 S3_BUCKET  = "aventdtlkps3stg01"
 S3_PREFIX  = "published/scada/summaries/archived/wwtp_wwl_pumpstatus_flow_consolidated/wwtp_flow_wwl_pumps_corrected"
 
-# All plants: (fid, display_name, slug, pump_file_fid, pump_tag_fid)
-# pump_file_fid: overrides FID used to build the pumps parquet filename (None = same as fid)
-# pump_tag_fid:  overrides FID string used to split pump tagnames (None = same as pump_file_fid or fid)
+# All plants: (fid, display_name, slug, pump_file_fid, pump_tag_fid, wwl_file_fid, secondary_fid)
+# pump_file_fid:  overrides FID used to build the pumps parquet filename (None = same as fid)
+# pump_tag_fid:   overrides FID string used to split pump tagnames (None = same as pump_file_fid or fid)
+# wwl_file_fid:   overrides FID used to build the wwl parquet filename (None = same as fid)
+# secondary_fid:  merges wwl + pumps from a second FID (concat before processing)
 PLANTS = [
     # Priority
-    ("0400", "69th Street WWTP",      "69th_street",      None,    "400"),   # tagnames use "400" not "0400"
-    ("0146", "Northeast WWTP",        "northeast",         None,    None),
-    ("0006", "Almeda Sims WWTP",      "almeda_sims",      "0005",  "005"),   # pump file is under fid=0005; tagnames use "005"
-    ("0083", "F.W.S.D. #23 WWTP",    "fwsd_23",           None,    None),
-    ("0469", "Willowbrook WWTP",      "willowbrook",       None,    None),
+    ("0400", "69th Street WWTP",      "69th_street",      None,    "400",  None,   None),  # tagnames use "400" not "0400"
+    ("0146", "Northeast WWTP",        "northeast",         None,    None,   None,   None),
+    ("0006", "Almeda Sims WWTP",      "almeda_sims",      "0005",  "005",  None,   None),  # pump file under fid=0005; tagnames use "005"
+    ("0083", "F.W.S.D. #23 WWTP",    "fwsd_23",           None,    None,   None,   None),
+    ("0469", "Willowbrook WWTP",      "willowbrook",       None,    None,   None,   None),
     # Others
-    ("0244", "Cedar Bayou WWTP",      "cedar_bayou",       None,    None),
-    ("0039", "Chocolate Bayou WWTP",  "chocolate_bayou",   None,    None),
-    ("0040", "Clinton Park WWTP",     "clinton_park",      None,    None),
-    ("0171", "Sagemont WWTP",         "sagemont",          None,    None),
-    ("0189", "Southeast WWTP",        "southeast",         None,    None),
-    ("0190", "S.W. Treatment Plant",  "southwest",         None,    None),
+    ("0244", "Cedar Bayou WWTP",      "cedar_bayou",       None,    None,   None,   None),
+    ("0039", "Chocolate Bayou WWTP",  "chocolate_bayou",   None,    None,   None,   None),
+    ("0040", "Clinton Park WWTP",     "clinton_park",      None,    None,   None,   None),
+    ("0171", "Sagemont WWTP",         "sagemont",          None,    None,   None,   None),
+    ("0189", "Southeast WWTP",        "southeast",         None,    None,   None,   None),
+    ("0190", "S.W. Treatment Plant",  "southwest",         None,    None,   None,   None),
     # Batch 2
-    ("0183", "Sims Bayou WWTP",       "sims_bayou",        None,    None),
-    ("0252", "Northbelt WWTP",        "northbelt",         None,    None),
-    ("0145", "Northwest WWTP",        "northwest",         None,    None),
-    ("0107", "Homestead WWTP",        "homestead",         None,    None),
-    ("0059", "Easthaven WWTP",        "easthaven",         None,    None),
-    ("0242", "Beltway WWTP",          "beltway",           None,    None),
-    ("0237", "West District WWTP",    "west_district",     None,    None),
-    ("0240", "Greenridge WWTP",       "greenridge",        None,    None),
-    ("0397", "Metro Central WWTP",    "metro_central",     None,    None),
-    ("0201", "Turkey Creek WWTP",     "turkey_creek",      None,    None),
+    ("0183", "Sims Bayou WWTP",       "sims_bayou",        None,    None,   None,   None),
+    ("0252", "Northbelt WWTP",        "northbelt",         None,    None,   None,   None),
+    ("0145", "Northwest WWTP",        "northwest",         None,    None,   None,   None),
+    ("0107", "Homestead WWTP",        "homestead",         None,    None,   None,   None),
+    ("0059", "Easthaven WWTP",        "easthaven",         None,    None,   None,   None),
+    ("0242", "Beltway WWTP",          "beltway",           None,    None,   None,   None),
+    ("0237", "West District WWTP",    "west_district",     None,    None,   None,   None),
+    ("0240", "Greenridge WWTP",       "greenridge",        None,    None,   None,   None),
+    ("0397", "Metro Central WWTP",    "metro_central",     None,    None,   None,   None),
+    ("0201", "Turkey Creek WWTP",     "turkey_creek",      None,    None,   None,   None),
     # Batch 3
-    ("0268", "Imperial Valley WWTP",  "imperial_valley",   None,    None),
-    ("0250", "Keegan's Bayou WWTP",   "keegans_bayou",     None,    None),
-    ("0485", "W.C.I.D. #76 WWTP",    "wcid_76",           None,    None),
-    ("0398", "Westway MUD WWTP",      "westway_mud",       None,    None),
-    ("0451", "MC MUD #48 WWTP",       "mc_mud_48",         None,    None),
+    ("0268", "Imperial Valley WWTP",  "imperial_valley",   None,    None,   None,   None),
+    ("0250", "Keegan's Bayou WWTP",   "keegans_bayou",     None,    None,   None,   None),
+    ("0485", "W.C.I.D. #76 WWTP",    "wcid_76",           None,    None,   None,   None),
+    ("0398", "Westway MUD WWTP",      "westway_mud",       None,    None,   None,   None),
+    ("0451", "MC MUD #48 WWTP",       "mc_mud_48",         None,    None,   None,   None),
+    # Batch 4
+    ("0243", "M.U.D. #203 WWTP",     "mud_203",           None,    None,   None,   None),
+    ("0274", "White Oak WWTP",        "white_oak",         None,    None,   None,   None),
+    ("0245", "Park Ten WWTP",         "park_ten",          None,    None,   None,   None),
+    ("0238", "Intercontinental Airport WWTP", "intercontinental_airport", None, None, None, None),
+    ("0225", "W.C.I.D. #47 WWTP",    "wcid_47",           None,    None,   None,   None),
+    # Batch 5
+    ("0279", "W.C.I.D. #111 WWTP",   "wcid_111",          None,    None,   None,   None),
+    ("0286", "Upper Brays WWTP",      "upper_brays",       None,    None,   None,   None),
+    ("0270", "Northgate WWTP",        "northgate",         None,    None,   None,   None),
+    ("0498", "Tidwell Timbers WWTP",  "tidwell_timbers",  "0499",  None,  "0499",  None),  # pump + wwl under FID 0499
+    ("0283", "Sims Bayou-South WWTP", "sims_bayou_south",  None,    None,   None,   None),
+    ("0565", "Forest Cove WWTP",      "forest_cove",       None,    None,   None,  "0566"),  # wwl + pumps split across 0565 + 0566
 ]
 # ─────────────────────────────────────────────────────────────────────────────
 
@@ -96,11 +111,12 @@ def read_parquet(fid, kind):
     return df
 
 
-def process_plant(fid, plant_name, slug, pump_file_fid=None, pump_tag_fid=None):
+def process_plant(fid, plant_name, slug, pump_file_fid=None, pump_tag_fid=None, wwl_file_fid=None, secondary_fid=None):
     out_dir = OUTPUT_BASE / slug / "data"
     out_dir.mkdir(parents=True, exist_ok=True)
     pfid  = pump_file_fid or fid           # FID used for the pumps parquet filename
     ptfid = pump_tag_fid  or pfid          # FID string used to split pump tagnames
+    wfid  = wwl_file_fid  or fid           # FID used for the wwl parquet filename
 
     print(f"\n{'='*60}")
     print(f"  {plant_name}  (FID {fid})")
@@ -109,10 +125,20 @@ def process_plant(fid, plant_name, slug, pump_file_fid=None, pump_tag_fid=None):
     print("  Reading parquet files…")
     df_flow  = read_parquet(fid,  "flow").rename(columns={"Value": "Flow_MGD"})
     df_pumps = read_parquet(pfid, "pumps").rename(columns={"Value": "Pumps_status"})
-    df_wwl   = read_parquet(fid,  "wwl").rename(columns={"Value": "WWL_ft"})
-
-    # Pumps: extract PumpID, deduplicate
     df_pumps["PumpID"] = df_pumps["Tagname"].apply(lambda t: extract_pump_id(t, ptfid))
+    df_wwl   = read_parquet(wfid, "wwl").rename(columns={"Value": "WWL_ft"})
+
+    if secondary_fid:
+        df_pumps2 = read_parquet(secondary_fid, "pumps").rename(columns={"Value": "Pumps_status"})
+        df_pumps2["PumpID"] = df_pumps2["Tagname"].apply(lambda t: extract_pump_id(t, secondary_fid))
+        df_pumps = pd.concat([df_pumps, df_pumps2], ignore_index=True)
+        try:
+            df_wwl2 = read_parquet(secondary_fid, "wwl").rename(columns={"Value": "WWL_ft"})
+            df_wwl = pd.concat([df_wwl, df_wwl2], ignore_index=True)
+        except Exception:
+            pass
+
+    # Pumps: deduplicate
     df_pumps = df_pumps.sort_values("Tagname").drop_duplicates(
         subset=["Timestamp", "PumpID"], keep="last"
     )
@@ -394,6 +420,12 @@ def make_plant_html(fid, plant_name, slug):
         f.write(html)
 
 
+NO_DATA_PLANTS = [
+    {"fid": "0518", "name": "Kingwood Central WWTP",  "reason": "No pump or wet well level data available in SCADA."},
+    {"fid": "0627", "name": "West Lake Houston TP",    "reason": "No pump or wet well level data available in SCADA."},
+]
+
+
 def make_landing_page(plant_infos):
     cards = ""
     for p in plant_infos:
@@ -404,6 +436,15 @@ def make_landing_page(plant_infos):
         <div class="plant-card-name">{p['name']}</div>
         <div class="plant-card-meta">{year_range}</div>
       </a>"""
+
+    no_data_cards = ""
+    for p in NO_DATA_PLANTS:
+        no_data_cards += f"""
+      <div class="plant-card plant-card--no-data">
+        <div class="plant-card-fid">FID {p['fid']}</div>
+        <div class="plant-card-name">{p['name']}</div>
+        <div class="plant-card-meta">{p['reason']}</div>
+      </div>"""
 
     html = f"""<!DOCTYPE html>
 <html lang="en">
@@ -438,6 +479,14 @@ def make_landing_page(plant_infos):
       border-color: rgba(72,208,201,0.5);
       transform: translateY(-2px);
     }}
+    .plant-card--no-data {{
+      opacity: 0.45;
+      cursor: default;
+    }}
+    .plant-card--no-data:hover {{
+      border-color: var(--border);
+      transform: none;
+    }}
     .plant-card-fid {{
       font-size: 12px; font-weight: 700; letter-spacing: 0.06em;
       color: #48d0c9; margin-bottom: 8px; text-transform: uppercase;
@@ -448,6 +497,15 @@ def make_landing_page(plant_infos):
     .plant-card-meta {{
       font-size: 13px; color: var(--muted);
     }}
+    .no-data-section {{
+      padding: 0 32px 32px;
+    }}
+    .no-data-section h2 {{
+      font-size: 13px; font-weight: 600; letter-spacing: 0.06em;
+      text-transform: uppercase; color: var(--muted);
+      margin: 0 0 14px; padding-top: 8px;
+      border-top: 1px solid rgba(122,156,199,0.12);
+    }}
   </style>
 </head>
 <body>
@@ -456,6 +514,11 @@ def make_landing_page(plant_infos):
     <p>SCADA Historical · WWLevel, Effluent Flow &amp; Pump Status</p>
   </div>
   <div class="plant-grid">{cards}
+  </div>
+  <div class="no-data-section">
+    <h2>No SCADA Data Available</h2>
+    <div class="plant-grid" style="padding:0;">{no_data_cards}
+    </div>
   </div>
 </body>
 </html>
@@ -472,10 +535,10 @@ args = parser.parse_args()
 plants_to_run = [p for p in PLANTS if not args.fid or p[0] == args.fid]
 
 results = []
-for fid, name, slug, pump_file_fid, pump_tag_fid in plants_to_run:
+for fid, name, slug, pump_file_fid, pump_tag_fid, wwl_file_fid, secondary_fid in plants_to_run:
     make_plant_html(fid, name, slug)
     try:
-        info = process_plant(fid, name, slug, pump_file_fid=pump_file_fid, pump_tag_fid=pump_tag_fid)
+        info = process_plant(fid, name, slug, pump_file_fid=pump_file_fid, pump_tag_fid=pump_tag_fid, wwl_file_fid=wwl_file_fid, secondary_fid=secondary_fid)
         results.append(info)
     except Exception as e:
         print(f"  ERROR processing {name}: {e}")
@@ -483,7 +546,7 @@ for fid, name, slug, pump_file_fid, pump_tag_fid in plants_to_run:
 
 # Rebuild landing page with all known plants
 all_plant_meta = []
-for fid, name, slug, pump_file_fid, pump_tag_fid in PLANTS:
+for fid, name, slug, pump_file_fid, pump_tag_fid, wwl_file_fid, secondary_fid in PLANTS:
     meta_path = OUTPUT_BASE / slug / "data" / "meta.json"
     if meta_path.exists():
         with open(meta_path) as f:

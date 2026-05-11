@@ -1,0 +1,1 @@
+window.__wwtp_meta={"plant":"Intercontinental Airport WWTP","fid":"0238","years":[2015,2016,2017,2018,2019,2020,2021,2022,2023,2024,2025,2026],"pumps":["LS_PMP1_JIS1","LS_PMP2_JIS1","LS_PMP3_JIS1","LS_PMP4_JIS1","LS_PMP5_JIS1"]};

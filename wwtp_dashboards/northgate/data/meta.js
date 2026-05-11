@@ -1,0 +1,1 @@
+window.__wwtp_meta={"plant":"Northgate WWTP","fid":"0270","years":[2015,2016,2017,2018,2019,2020,2021,2022,2023,2024,2025,2026],"pumps":["DYN101","DYN102","DYN103","DYN104","DYN105"]};

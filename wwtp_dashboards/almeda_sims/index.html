@@ -57,7 +57,7 @@
     }
     .filter-stats {
       display: flex; align-items: center; gap: 16px;
-      margin-left: auto; padding-left: 24px; flex-shrink: 0;
+      padding-left: 24px; flex-shrink: 0;
       border-left: 1px solid rgba(122,156,199,0.14);
     }
     .fstat-group { display: flex; flex-direction: column; gap: 5px; }
@@ -86,6 +86,24 @@
       width: 1px; height: 52px; align-self: center;
       background: rgba(122,156,199,0.14);
     }
+    .side-toggle {
+      display: flex; align-items: center;
+      background: rgba(10,19,31,0.4);
+      border: 1px solid rgba(108,143,186,0.28);
+      border-radius: 10px; padding: 3px; gap: 2px;
+      flex-shrink: 0;
+    }
+    .side-btn {
+      height: 30px; padding: 0 16px; border: none; border-radius: 8px;
+      background: transparent; color: var(--muted);
+      font: inherit; font-size: 13px; font-weight: 700;
+      cursor: pointer; transition: background 0.15s, color 0.15s;
+    }
+    .side-btn.active {
+      background: rgba(72,208,201,0.16);
+      color: #7fe7e1;
+    }
+    .side-btn:hover:not(.active) { color: var(--text); }
     .charts-wrap {
       padding: 16px 18px 24px;
       display: flex; flex-direction: column; gap: 14px;
@@ -154,6 +172,12 @@
       </label>
       <button id="btn-reset" class="reset-btn">Reset</button>
     </div>
+    <div style="flex:1; display:flex; justify-content:center;">
+      <div class="side-toggle" id="side-toggle">
+        <button class="side-btn active" data-side="east" type="button">East</button>
+        <button class="side-btn" data-side="west" type="button">West</button>
+      </div>
+    </div>
     <div class="filter-stats" id="filter-stats">
       <div class="fstat-group">
         <div class="fstat-label">Flow, MGD</div>
@@ -182,8 +206,6 @@
   <div class="subtabs">
     <button class="subtab active" data-tab="combined">Combined</button>
     <button class="subtab" data-tab="separate">Separate</button>
-    <button class="subtab" data-tab="east">East</button>
-    <button class="subtab" data-tab="west">West</button>
   </div>
 
   <div id="loading-msg">Loading data…</div>
@@ -215,32 +237,6 @@
       <div class="chart-panel">
         <div class="chart-panel-title">Effluent Flow, MGD</div>
         <div id="chart-sep-flow" class="chart-el" style="height:220px;"></div>
-      </div>
-    </div>
-  </div>
-
-  <div id="tab-east" class="tab-pane">
-    <div class="charts-wrap">
-      <div class="chart-panel">
-        <div class="chart-panel-title">East — Pumps Status vs. Flow, MGD</div>
-        <div id="chart-east-flow" class="chart-el" style="height:300px;"></div>
-      </div>
-      <div class="chart-panel">
-        <div class="chart-panel-title">East — Pumps Status vs. Wet Well Level, ft</div>
-        <div id="chart-east-wwl" class="chart-el" style="height:300px;"></div>
-      </div>
-    </div>
-  </div>
-
-  <div id="tab-west" class="tab-pane">
-    <div class="charts-wrap">
-      <div class="chart-panel">
-        <div class="chart-panel-title">West — Pumps Status vs. Flow, MGD</div>
-        <div id="chart-west-flow" class="chart-el" style="height:300px;"></div>
-      </div>
-      <div class="chart-panel">
-        <div class="chart-panel-title">West — Pumps Status vs. Wet Well Level, ft</div>
-        <div id="chart-west-wwl" class="chart-el" style="height:300px;"></div>
       </div>
     </div>
   </div>

@@ -27,6 +27,7 @@
   let charts      = {};
   let savedZoom   = null;
   let rerendering = false;
+  let selectedSide = PLANT_CONFIG.pumpGroups ? "east" : null;
 
   const ZOOM_HOURLY_THRESHOLD = 60;
 
@@ -724,12 +725,26 @@
     };
   }
 
+  function applySideFilter(vd) {
+    if (!selectedSide || !PLANT_CONFIG.pumpGroups) return vd;
+    const pumpIds = PLANT_CONFIG.pumpGroups[selectedSide] || [];
+    return {
+      ...vd,
+      pumps: vd.pumps.filter(p => pumpIds.includes(p)),
+      pump_status: Object.fromEntries(
+        vd.pumps.filter(p => pumpIds.includes(p)).map(p => [p, vd.pump_status[p]])
+      ),
+      wwl: vd["wwl_" + selectedSide] || vd.wwl,
+    };
+  }
+
   function renderStatisticsPanel(slice) {
     const fmt = v => v == null ? "—" : v.toFixed(2);
     const set = (id, v) => { const el = document.getElementById(id); if (el) el.textContent = fmt(v); };
     const daily  = ts => ts.substring(0, 10);
     const weekly = ts => isoWeekInfo(ts).key;
-    for (const [sig, values] of [["flow", slice.flow], ["wwl", slice.wwl]]) {
+    const wwlValues = selectedSide && slice["wwl_" + selectedSide] ? slice["wwl_" + selectedSide] : slice.wwl;
+    for (const [sig, values] of [["flow", slice.flow], ["wwl", wwlValues]]) {
       const d = summarizeGroupedStats(slice.timestamps, values, daily);
       const w = summarizeGroupedStats(slice.timestamps, values, weekly);
       set(`stat-${sig}-d-min`,  d.min);  set(`stat-${sig}-d-mean`, d.mean);  set(`stat-${sig}-d-max`, d.max);
@@ -793,36 +808,17 @@
     renderRainChart("chart-sep-rain", rainVd);
   }
 
-  function renderSide(side, vd) {
-    const pg = PLANT_CONFIG.pumpGroups;
-    if (!pg) return;
-    const pumpIds = pg[side] || [];
-    const sideVd = {
-      ...vd,
-      pumps: vd.pumps.filter(p => pumpIds.includes(p)),
-      pump_status: Object.fromEntries(
-        vd.pumps.filter(p => pumpIds.includes(p)).map(p => [p, vd.pump_status[p]])
-      ),
-      wwl: vd["wwl_" + side] || vd.wwl,
-    };
-    const c1 = initChart("chart-" + side + "-flow", "wwtp");
-    if (c1) { c1.setOption(makeComboOption(sideVd, "flow", "Flow, MGD", FLOW_COLOR, 2, null)); attachMinuteHover("chart-" + side + "-flow", c1, sideVd.timestamps, sideVd.granularity); }
-    const c2 = initChart("chart-" + side + "-wwl", "wwtp");
-    if (c2) { c2.setOption(makeComboOption(sideVd, "wwl", "WWL, ft", WWL_COLOR, 2.5, null)); attachMinuteHover("chart-" + side + "-wwl", c2, sideVd.timestamps, sideVd.granularity); }
-  }
 
   function renderActive() {
     const slice = getFilteredSlice();
     if (!slice) return;
     renderStatisticsPanel(slice);
-    const vd = getViewData();
+    const vd = applySideFilter(getViewData());
     if (!vd) return;
     const rainVd = getRainViewData();
     const active = document.querySelector(".tab-pane.active");
     if (!active) return;
     if (active.id === "tab-combined") renderCombined(vd, rainVd);
-    else if (active.id === "tab-east")  renderSide("east", vd);
-    else if (active.id === "tab-west")  renderSide("west", vd);
     else renderSeparate(vd, rainVd);
   }
 
@@ -949,22 +945,30 @@
       updateRainToggleUI();
     }
 
-    // Load most recent year, default to Jan 1 (shows minute level immediately)
+    // Load most recent year, default to May 2026
     const sortedYears = meta.years.slice().sort((a,b) => b - a);
     msYear.setOptions(sortedYears.map(y => ({ value: y, label: String(y) })));
-    const defaultYear = meta.years[meta.years.length - 1];
+    const defaultYear = meta.years.includes(2026) ? 2026 : meta.years[meta.years.length - 1];
     sel.years = [defaultYear];
     msYear.setSelected([defaultYear]);
     await loadYears([defaultYear]);
 
-    // Default to January, Week 1
-    const week1 = isoWeek(`${defaultYear}-01-04 00:00`); // Jan 4 is always in ISO week 1
-    sel.months = [1]; sel.weeks = [week1];
-    msMonth.setSelected([1]);
-    populateWeeks([1]);
-    msWeek.setSelected([week1]);
-    populateDays([1], [week1]);
+    // Default to May
+    const defaultMonth = (defaultYear === 2026 && meta.years.includes(2026)) ? 5 : 1;
+    sel.months = [defaultMonth];
+    msMonth.setSelected([defaultMonth]);
+    populateWeeks([defaultMonth]);
+    populateDays([defaultMonth], []);
     renderActive();
+
+    document.querySelectorAll(".side-btn[data-side]").forEach(btn => {
+      btn.addEventListener("click", () => {
+        document.querySelectorAll(".side-btn").forEach(b => b.classList.remove("active"));
+        btn.classList.add("active");
+        selectedSide = btn.dataset.side;
+        renderActive();
+      });
+    });
 
     document.getElementById("btn-reset").addEventListener("click", () => {
       sel.months = []; sel.days = []; sel.weeks = [];

@@ -123,6 +123,8 @@
   <div class="subtabs">
     <button class="subtab active" data-tab="combined">Combined</button>
     <button class="subtab" data-tab="separate">Separate</button>
+    <button class="subtab" data-tab="east">East</button>
+    <button class="subtab" data-tab="west">West</button>
   </div>
 
   <div id="loading-msg">Loading data…</div>
@@ -158,12 +160,42 @@
     </div>
   </div>
 
+  <div id="tab-east" class="tab-pane">
+    <div class="charts-wrap">
+      <div class="chart-panel">
+        <div class="chart-panel-title">East — Pumps Status vs. Flow, MGD</div>
+        <div id="chart-east-flow" class="chart-el" style="height:300px;"></div>
+      </div>
+      <div class="chart-panel">
+        <div class="chart-panel-title">East — Pumps Status vs. Wet Well Level, ft</div>
+        <div id="chart-east-wwl" class="chart-el" style="height:300px;"></div>
+      </div>
+    </div>
+  </div>
+
+  <div id="tab-west" class="tab-pane">
+    <div class="charts-wrap">
+      <div class="chart-panel">
+        <div class="chart-panel-title">West — Pumps Status vs. Flow, MGD</div>
+        <div id="chart-west-flow" class="chart-el" style="height:300px;"></div>
+      </div>
+      <div class="chart-panel">
+        <div class="chart-panel-title">West — Pumps Status vs. Wet Well Level, ft</div>
+        <div id="chart-west-wwl" class="chart-el" style="height:300px;"></div>
+      </div>
+    </div>
+  </div>
+
   <script src="https://cdn.jsdelivr.net/npm/echarts@5/dist/echarts.min.js"></script>
   <script>
     const PLANT_CONFIG = {
       name:    "Almeda Sims WWTP",
       fid:     "0006",
       dataDir: "./data/",
+      pumpGroups: {
+        east: ["AELS_DP1", "AELS_DP2", "AELS_WP1", "AELS_WP2", "AELS_WP3"],
+        west: ["ADP1", "ADP2", "AWP1", "AWP2", "AWP3"],
+      },
     };
   </script>
   <script src="../dashboard.js"></script>

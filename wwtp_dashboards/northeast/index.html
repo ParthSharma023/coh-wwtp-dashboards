@@ -52,6 +52,32 @@
       height: 36px; padding: 0 16px; margin-top: 0;
       width: auto; border-radius: 8px; font-size: 13px;
     }
+    .rain-toggle-btn {
+      height: 36px;
+      padding: 0 14px;
+      border-radius: 10px;
+      border: 1px solid rgba(108,143,186,0.28);
+      background: rgba(16,32,50,0.45);
+      color: var(--muted);
+      font: inherit;
+      font-size: 13px;
+      font-weight: 700;
+      cursor: pointer;
+      transition: border-color 0.18s, background 0.18s, color 0.18s;
+    }
+    .rain-toggle-btn:hover:not(:disabled) {
+      border-color: rgba(72,208,201,0.45);
+      color: var(--text);
+    }
+    .rain-toggle-btn.is-on {
+      background: rgba(72,208,201,0.14);
+      border-color: rgba(72,208,201,0.58);
+      color: #7fe7e1;
+    }
+    .rain-toggle-btn:disabled {
+      opacity: 0.45;
+      cursor: default;
+    }
     .charts-wrap {
       padding: 16px 18px 24px;
       display: flex; flex-direction: column; gap: 14px;
@@ -117,6 +143,13 @@
         <div class="ms-panel"></div>
       </div>
     </label>
+    <label>Gauge
+      <div class="multi-select" id="ms-gauge">
+        <button class="ms-trigger" type="button">Gauge ▾</button>
+        <div class="ms-panel"></div>
+      </div>
+    </label>
+    <button id="btn-rain-toggle" class="rain-toggle-btn is-on" type="button" aria-pressed="true">Include Rain</button>
     <button id="btn-reset" class="reset-btn">Reset</button>
   </div>
 
@@ -155,6 +188,10 @@
         <div class="chart-panel-title">Effluent Flow, MGD</div>
         <div id="chart-sep-flow" class="chart-el" style="height:220px;"></div>
       </div>
+      <div class="chart-panel">
+        <div class="chart-panel-title">Rainfall, in · Gauge 1610</div>
+        <div id="chart-sep-rain" class="chart-el" style="height:220px;"></div>
+      </div>
     </div>
   </div>
 
@@ -164,6 +201,10 @@
       name:    "Northeast WWTP",
       fid:     "0146",
       dataDir: "./data/",
+      rain: {
+        gauge: "1610",
+        label: "Greens Bayou @ Normandy Street",
+      },
     };
   </script>
   <script src="../dashboard.js"></script>

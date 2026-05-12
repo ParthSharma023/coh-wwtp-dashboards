@@ -12,6 +12,7 @@
   ];
   const FLOW_COLOR  = "#f1f5fb";
   const LINE_WIDTHS = { flow: 2, wwl: 2.5 };
+  const RAIN_COLOR  = "#48d0c9";
   const WWL_COLOR   = "#f1f5fb";
   const AXIS_COLOR  = "rgba(180,192,208,0.45)";
   const SPLIT_COLOR = "rgba(180,192,208,0.07)";
@@ -19,6 +20,8 @@
   const TIP_BORDER  = "rgba(122,156,199,0.28)";
 
   let meta        = null;
+  let rainYearData = null;
+  let rainMinuteCache = {};
   let yearData    = null;
   let minuteCache = {};
   let charts      = {};
@@ -114,13 +117,16 @@
     });
   }
 
-  const sel = { years: [], months: [], days: [], weeks: [] };
-  let msYear = null, msMonth = null, msDay = null, msWeek = null;
+  const sel = { years: [], months: [], days: [], weeks: [], gauges: [], includeRain: true };
+  let msYear = null, msMonth = null, msDay = null, msWeek = null, msGauge = null;
 
   // ── Helpers ────────────────────────────────────────────────────────────────
   const avg    = arr => { const v = arr.filter(x => x != null); return v.length ? v.reduce((a,b)=>a+b,0)/v.length : null; };
   const sum    = arr => { const v = arr.filter(x => x != null); return v.length ? v.reduce((a,b)=>a+b,0) : null; };
   const maxVal = arr => { const v = arr.filter(x => x != null); return v.length ? Math.max(...v) : null; };
+  const hasRain = () => !!(PLANT_CONFIG.rain && PLANT_CONFIG.rain.gauge);
+  const rainEnabled = () => !hasRain() || sel.gauges.includes(PLANT_CONFIG.rain.gauge);
+  const showRainOverlay = () => hasRain() && rainEnabled() && sel.includeRain;
 
   function isoWeek(ts) {
     const d = new Date(ts.length === 10 ? ts + "T00:00" : ts.replace(" ", "T"));
@@ -137,13 +143,20 @@
     return mo[month] + " " + day + " " + ts.substring(11,16);
   }
 
+  function floorToFiveMinute(ts) {
+    if (!ts || ts.length < 16) return ts;
+    const prefix = ts.substring(0, 14);
+    const minute = +ts.substring(14, 16);
+    return prefix + String(Math.floor(minute / 5) * 5).padStart(2, "0");
+  }
+
   // ── Year data loading + merging ───────────────────────────────────────────
   function mergeYearData(years) {
     const datasets = years.map(y => window.__wwtp_year && window.__wwtp_year[y]).filter(Boolean);
     if (!datasets.length) return null;
     if (datasets.length === 1) return datasets[0];
     const allPumps = [...new Set(datasets.flatMap(d => d.pumps))].sort();
-    return {
+    const merged = {
       plant: datasets[0].plant, fid: datasets[0].fid,
       pumps: allPumps,
       timestamps: datasets.flatMap(d => d.timestamps),
@@ -153,6 +166,39 @@
         p, datasets.flatMap(d => d.pump_status[p] || new Array(d.timestamps.length).fill(null))
       ])),
     };
+    if (datasets[0].wwl_east != null) {
+      merged.wwl_east = datasets.flatMap(d => d.wwl_east || new Array(d.timestamps.length).fill(null));
+      merged.wwl_west = datasets.flatMap(d => d.wwl_west || new Array(d.timestamps.length).fill(null));
+    }
+    return merged;
+  }
+
+  function mergeRainYears(years) {
+    const datasets = years.map(y => window.__wwtp_rain && window.__wwtp_rain[y]).filter(Boolean);
+    if (!datasets.length) return null;
+    if (datasets.length === 1) return datasets[0];
+    return {
+      plant: datasets[0].plant,
+      fid: datasets[0].fid,
+      gauge: datasets[0].gauge,
+      timestamps: datasets.flatMap(d => d.timestamps),
+      rain: datasets.flatMap(d => d.rain),
+    };
+  }
+
+  async function loadRainYears(years) {
+    if (!hasRain()) {
+      rainYearData = null;
+      return;
+    }
+    for (const year of years) {
+      if (!window.__wwtp_rain || !window.__wwtp_rain[year]) {
+        try {
+          await loadScript(PLANT_CONFIG.dataDir + "rain_" + year + ".js");
+        } catch (e) {}
+      }
+    }
+    rainYearData = mergeRainYears(years);
   }
 
   async function loadYears(years) {
@@ -167,6 +213,7 @@
       const data = mergeYearData(years);
       if (!data) throw new Error("Not found");
       yearData = data;
+      await loadRainYears(years);
       sel.months = []; sel.days = []; sel.weeks = [];
       if (msMonth) msMonth.clear();
       if (msDay)   msDay.clear();
@@ -184,18 +231,53 @@
   async function loadMinuteData(year, month) {
     const key = `${year}_${String(month).padStart(2, "0")}`;
     if (minuteCache[key]) return minuteCache[key];
+    if (minuteCache[key + "_loading"]) return null;
+    minuteCache[key + "_loading"] = true;
     try {
       await loadScript(PLANT_CONFIG.dataDir + key + "_min.js");
       const data = window.__wwtp_min && window.__wwtp_min[key];
-      if (data) minuteCache[key] = data;
+      if (data) {
+        data.tsIndex = Object.fromEntries(data.timestamps.map((ts, i) => [ts, i]));
+        minuteCache[key] = data;
+      }
       return data || null;
     } catch (e) { return null; }
+    finally { delete minuteCache[key + "_loading"]; }
   }
 
   function minuteKey() {
     return (sel.years.length === 1 && sel.months.length === 1)
       ? `${sel.years[0]}_${String(sel.months[0]).padStart(2, "0")}`
       : null;
+  }
+
+  async function loadRainMinuteData(year, month) {
+    const key = `${year}_${String(month).padStart(2, "0")}`;
+    if (rainMinuteCache[key]) return rainMinuteCache[key];
+    if (rainMinuteCache[key + "_loading"]) return null;
+    rainMinuteCache[key + "_loading"] = true;
+    try {
+      await loadScript(PLANT_CONFIG.dataDir + "rain_" + key + "_min.js");
+      const data = window.__wwtp_rain_min && window.__wwtp_rain_min[key];
+      if (data) rainMinuteCache[key] = data;
+      return data || null;
+    } catch (e) { return null; }
+    finally { delete rainMinuteCache[key + "_loading"]; }
+  }
+
+  function aggregateDailyRain(timestamps, rain) {
+    const buckets = {};
+    timestamps.forEach((ts, i) => {
+      const day = ts.substring(0, 10);
+      if (!buckets[day]) buckets[day] = [];
+      if (rain[i] != null) buckets[day].push(rain[i]);
+    });
+    const days = Object.keys(buckets).sort();
+    return {
+      timestamps: days,
+      rain: days.map(d => sum(buckets[d]) ?? 0),
+      granularity: "daily",
+    };
   }
 
   // ── Filter + aggregate ────────────────────────────────────────────────────
@@ -216,16 +298,56 @@
       return true;
     });
 
-    const fi = arr => arr.filter((_,i) => mask[i]);
+    const fi = arr => arr ? arr.filter((_,i) => mask[i]) : null;
     const tsFilt   = fi(timestamps);
     const flowFilt = fi(flow);
     const wwlFilt  = fi(wwl);
+    const wwlEastFilt = fi(src.wwl_east);
+    const wwlWestFilt = fi(src.wwl_west);
     const pumpFilt = {};
     pumps.forEach(p => { pumpFilt[p] = fi(pump_status[p]); });
 
-    if (!months.length && !weeks.length) return filterActivePumps(aggregateDaily(tsFilt, flowFilt, wwlFilt, pumpFilt, pumps));
-    return filterActivePumps({ timestamps: tsFilt, flow: flowFilt, wwl: wwlFilt, pump_status: pumpFilt, pumps, granularity: gran });
+    const extra = {};
+    if (wwlEastFilt) { extra.wwl_east = wwlEastFilt; extra.wwl_west = wwlWestFilt; }
+
+    if (!months.length && !weeks.length) return filterActivePumps({ ...aggregateDaily(tsFilt, flowFilt, wwlFilt, pumpFilt, pumps), ...extra });
+    return filterActivePumps({ timestamps: tsFilt, flow: flowFilt, wwl: wwlFilt, pump_status: pumpFilt, pumps, granularity: gran, ...extra });
   }
+
+  function getRainViewData() {
+    if (!rainYearData || !rainEnabled()) return null;
+    const { months, days, weeks } = sel;
+    const mk = minuteKey();
+    const useMins = days.length === 1 && months.length === 1 && mk && rainMinuteCache[mk];
+    const src = useMins ? { ...rainMinuteCache[mk], granularity: "5min" } : rainYearData;
+    const { timestamps, rain } = src;
+    const gran = src.granularity || "hourly";
+
+    const mask = timestamps.map(ts => {
+      if (months.length && !months.includes(+ts.substring(5,7))) return false;
+      if (days.length   && !days.includes(+ts.substring(8,10)))  return false;
+      if (weeks.length  && !weeks.includes(isoWeek(ts)))         return false;
+      return true;
+    });
+
+    const fi = arr => arr.filter((_,i) => mask[i]);
+    const tsFilt   = fi(timestamps);
+    const rainFilt = fi(rain);
+
+    if (!months.length && !weeks.length) return aggregateDailyRain(tsFilt, rainFilt);
+    return { timestamps: tsFilt, rain: rainFilt, granularity: gran };
+  }
+
+  function alignRainToTimestamps(targetTimestamps, rainVd) {
+    if (!rainVd) return null;
+    const lookup = Object.fromEntries(rainVd.timestamps.map((ts, i) => [ts, rainVd.rain[i]]));
+    return {
+      data: targetTimestamps.map(ts => Object.prototype.hasOwnProperty.call(lookup, ts) ? lookup[ts] : null),
+      lookup,
+      granularity: rainVd.granularity,
+    };
+  }
+
 
   function filterActivePumps(vd) {
     const activePumps = vd.pumps.filter(p =>
@@ -292,6 +414,20 @@
     return { ...yAxisLeft(name), position: "right", splitLine: { show: false } };
   }
 
+  function yAxisRain() {
+    return {
+      type: "value",
+      min: 0,
+      position: "right",
+      offset: 58,
+      axisLabel: { show: false },
+      axisLine: { show: false },
+      axisTick: { show: false },
+      splitLine: { show: false },
+      name: "",
+    };
+  }
+
   function dataZoom(timestamps, granularity) {
     return [
       { type: "inside", xAxisIndex: 0, start: 0, end: 100 },
@@ -303,21 +439,107 @@
     ];
   }
 
-  function tooltip() {
+  let hoveredMinuteTs = null;
+  const _minHoverListeners = {};
+
+  function attachMinuteHover(chartId, chart, timestamps, granularity) {
+    const prev = _minHoverListeners[chartId];
+    if (prev) {
+      prev.dom.removeEventListener("mousemove", prev.move);
+      prev.dom.removeEventListener("mouseleave", prev.leave);
+    }
+    if (granularity === "minute") {
+      _minHoverListeners[chartId] = null;
+      return;
+    }
+    const dom = chart.getDom();
+    const n   = timestamps.length;
+    const minsPerBar = granularity === "daily" ? 1440 : 60;
+
+    const move = function(e) {
+      const rect   = dom.getBoundingClientRect();
+      const mouseX = e.clientX - rect.left;
+      const x0     = chart.convertToPixel({ xAxisIndex: 0 }, 0);
+      const x1     = chart.convertToPixel({ xAxisIndex: 0 }, n - 1);
+      if (x0 == null || x1 == null || x1 === x0) { hoveredMinuteTs = null; return; }
+
+      const floatIdx = (mouseX - x0) / (x1 - x0) * (n - 1);
+      const barIdx   = Math.max(0, Math.min(n - 1, Math.floor(floatIdx)));
+      const fraction = Math.max(0, Math.min(0.999, floatIdx - barIdx));
+      const barTs    = timestamps[barIdx];
+
+      const year  = +barTs.substring(0, 4);
+      const month = +barTs.substring(5, 7);
+      const mk    = `${year}_${String(month).padStart(2, "0")}`;
+      const md    = minuteCache[mk];
+      if (!md) { loadMinuteData(year, month); hoveredMinuteTs = null; return; }
+
+      let minuteTs;
+      if (granularity === "daily") {
+        const totalMins = Math.round(fraction * minsPerBar);
+        const estHour   = Math.floor(totalMins / 60);
+        const estMin    = totalMins % 60;
+        minuteTs = barTs + " " + String(estHour).padStart(2, "0") + ":" + String(estMin).padStart(2, "0");
+      } else {
+        const h      = +barTs.substring(11, 13);
+        const estMin = Math.min(59, Math.round(fraction * 60));
+        minuteTs = barTs.substring(0, 11) + String(h).padStart(2, "0") + ":" + String(estMin).padStart(2, "0");
+      }
+
+      const idx = md.tsIndex ? md.tsIndex[minuteTs] : md.timestamps.indexOf(minuteTs);
+      if (idx != null && idx !== -1) {
+        hoveredMinuteTs = { ts: minuteTs, flow: md.flow[idx], wwl: md.wwl[idx] };
+      } else {
+        hoveredMinuteTs = null;
+      }
+    };
+
+    const leave = () => { hoveredMinuteTs = null; };
+    dom.addEventListener("mousemove", move);
+    dom.addEventListener("mouseleave", leave);
+    _minHoverListeners[chartId] = { dom, move, leave };
+  }
+
+  function tooltip(opts) {
+    opts = opts || {};
+    const rainLookup = opts.rainLookup || null;
+    const rainGranularity = opts.rainGranularity || null;
+    const rainSeriesName = "Rain, in";
     return {
       trigger: "axis",
       backgroundColor: TIP_BG, borderColor: TIP_BORDER,
       textStyle: { color: "#eff5fb", fontSize: 12 },
       axisPointer: { type: "shadow" },
       formatter: params => {
-        let out = '<div style="margin-bottom:4px;font-weight:600">' + params[0].axisValue + '</div>';
+        const canUseMinuteHover = params.some(p =>
+          p.seriesName === "Flow, MGD" || p.seriesName === "WWL, ft"
+        );
+        const hm = canUseMinuteHover ? hoveredMinuteTs : null;
+        const axisTs = params[0].axisValue;
+        const ts = (hm && hm.ts) || axisTs;
+        let out = '<div style="margin-bottom:4px;font-weight:600">' + ts + '</div>';
         params.forEach(p => {
           if (p.value == null || p.value === "-") return;
-          const v = typeof p.value === "number"
-            ? (Number.isInteger(p.value) ? p.value : +p.value.toFixed(2))
-            : p.value;
+          let raw = p.value;
+          if (hm) {
+            if (p.seriesName === "Flow, MGD" && hm.flow != null) raw = hm.flow;
+            else if (p.seriesName === "WWL, ft" && hm.wwl != null) raw = hm.wwl;
+          }
+          const v = typeof raw === "number"
+            ? (Number.isInteger(raw) ? raw : +raw.toFixed(2))
+            : raw;
           out += p.marker + " " + p.seriesName + "&nbsp;&nbsp;<b>" + v + "</b><br/>";
         });
+        if (rainLookup && !params.some(p => p.seriesName === rainSeriesName)) {
+          let rainTs = axisTs;
+          if (rainGranularity === "5min") rainTs = floorToFiveMinute(ts);
+          const rainVal = rainLookup[rainTs];
+          if (rainVal != null) {
+            const label = rainGranularity === "5min" ? "Rain (5-min)" : rainGranularity === "daily" ? "Rain (daily)" : "Rain";
+            out += '<span style="display:inline-block;margin-right:6px;border-radius:50%;width:8px;height:8px;background:' + RAIN_COLOR + ';"></span>' +
+              label + "&nbsp;&nbsp;<b>" + (+rainVal.toFixed(2)) + "</b><br/>";
+          }
+        }
         return out;
       },
     };
@@ -331,23 +553,42 @@
     };
   }
 
-  function makeComboOption(vd, overlayKey, overlayName, overlayColor, lineWidth) {
+  function makeComboOption(vd, overlayKey, overlayName, overlayColor, lineWidth, rainVd) {
     const { timestamps, pump_status, pumps, granularity } = vd;
     const overlay = vd[overlayKey];
+    const rain = alignRainToTimestamps(timestamps, rainVd);
+    const rainFocus = !!rain;
+    const yAxes = [yAxisLeft("Pump Status (0/1)"), yAxisRight(overlayName)];
+    if (rain) yAxes.push(yAxisRain());
+    const legendNames = rain ? [...pumps, "Rain, in", overlayName] : [...pumps, overlayName];
     return {
       backgroundColor: "transparent",
-      tooltip: tooltip(),
-      legend: legend([...pumps, overlayName]),
+      tooltip: tooltip({ rainLookup: rain && rain.lookup, rainGranularity: rain && rain.granularity }),
+      legend: legend(legendNames),
       grid: { left: 70, right: 70, top: 44, bottom: 52 },
       dataZoom: dataZoom(timestamps, granularity),
       xAxis: xAxisOpt(timestamps, granularity),
-      yAxis: [yAxisLeft("Pump Status (0/1)"), yAxisRight(overlayName)],
+      yAxis: yAxes,
       series: [
         ...pumps.map((pid, i) => ({
           name: pid, type: "bar", stack: "pumps", yAxisIndex: 0,
-          itemStyle: { color: PUMP_COLORS[i % PUMP_COLORS.length] },
+          itemStyle: {
+            color: PUMP_COLORS[i % PUMP_COLORS.length],
+            opacity: rainFocus ? 0.26 : 1,
+          },
           data: pump_status[pid], barMaxWidth: 24,
+          z: 1,
         })),
+        ...(rain ? [{
+          name: "Rain, in",
+          type: "bar",
+          yAxisIndex: 2,
+          data: rain.data,
+          barMaxWidth: granularity === "minute" ? 8 : 16,
+          itemStyle: { color: "rgba(72,208,201,0.55)" },
+          emphasis: { itemStyle: { color: "rgba(72,208,201,0.78)" } },
+          z: 4,
+        }] : []),
         {
           name: overlayName, type: "line", yAxisIndex: 1,
           data: overlay,
@@ -389,40 +630,115 @@
     };
   }
 
+  function makeRainOption(vd) {
+    return {
+      backgroundColor: "transparent",
+      tooltip: tooltip(),
+      grid: { left: 70, right: 20, top: 16, bottom: 52 },
+      dataZoom: dataZoom(vd.timestamps, vd.granularity),
+      xAxis: xAxisOpt(vd.timestamps, vd.granularity),
+      yAxis: yAxisLeft("Rainfall, in"),
+      series: [{ name: "Rain, in", type: "bar", data: vd.rain, itemStyle: { color: RAIN_COLOR }, barMaxWidth: 24 }],
+    };
+  }
+
   // ── Render ────────────────────────────────────────────────────────────────
-  function initChart(id) {
+  function initChart(id, groupName) {
     const el = document.getElementById(id);
     if (!el) return null;
     if (charts[id]) { charts[id].dispose(); delete charts[id]; }
     charts[id] = echarts.init(el, null, { renderer: "canvas" });
-    charts[id].group = "wwtp";
-    echarts.connect("wwtp");
+    if (groupName) {
+      charts[id].group = groupName;
+      echarts.connect(groupName);
+    }
     return charts[id];
   }
 
-  function renderCombined(vd) {
-    const c1 = initChart("chart-flow");
-    if (c1) c1.setOption(makeComboOption(vd, "flow", "Flow, MGD", FLOW_COLOR, 2));
-    const c2 = initChart("chart-wwl");
-    if (c2) c2.setOption(makeComboOption(vd, "wwl", "WWL, ft", WWL_COLOR, 2.5));
+  function renderRainChart(id, rainVd) {
+    const c = initChart(id, "wwtp-rain");
+    if (!c) return;
+    if (!rainVd) {
+      c.clear();
+      return;
+    }
+    c.setOption(makeRainOption(rainVd));
   }
 
-  function renderSeparate(vd) {
-    const c1 = initChart("chart-sep-pumps");
-    if (c1) c1.setOption(makePumpsSepOption(vd));
-    const c2 = initChart("chart-sep-wwl");
-    if (c2) c2.setOption(makeSingleOption(vd.timestamps, vd.wwl, WWL_COLOR, "WWL, ft", vd.granularity));
-    const c3 = initChart("chart-sep-flow");
-    if (c3) c3.setOption(makeSingleOption(vd.timestamps, vd.flow, FLOW_COLOR, "Flow, MGD", vd.granularity));
+  function renderCombined(vd, rainVd) {
+    const c1 = initChart("chart-flow", "wwtp");
+    const combinedRain = showRainOverlay() ? rainVd : null;
+    if (c1) { c1.setOption(makeComboOption(vd, "flow", "Flow, MGD", FLOW_COLOR, 2, combinedRain)); attachMinuteHover("chart-flow", c1, vd.timestamps, vd.granularity); }
+    const c2 = initChart("chart-wwl", "wwtp");
+    if (c2) { c2.setOption(makeComboOption(vd, "wwl", "WWL, ft", WWL_COLOR, 2.5, combinedRain)); attachMinuteHover("chart-wwl", c2, vd.timestamps, vd.granularity); }
+  }
+
+  function renderSeparate(vd, rainVd) {
+    const c1 = initChart("chart-sep-pumps", "wwtp");
+    if (c1) { c1.setOption(makePumpsSepOption(vd)); attachMinuteHover("chart-sep-pumps", c1, vd.timestamps, vd.granularity); }
+    const c2 = initChart("chart-sep-wwl", "wwtp");
+    if (c2) { c2.setOption(makeSingleOption(vd.timestamps, vd.wwl, WWL_COLOR, "WWL, ft", vd.granularity)); attachMinuteHover("chart-sep-wwl", c2, vd.timestamps, vd.granularity); }
+    const c3 = initChart("chart-sep-flow", "wwtp");
+    if (c3) { c3.setOption(makeSingleOption(vd.timestamps, vd.flow, FLOW_COLOR, "Flow, MGD", vd.granularity)); attachMinuteHover("chart-sep-flow", c3, vd.timestamps, vd.granularity); }
+    renderRainChart("chart-sep-rain", rainVd);
+  }
+
+  function renderStats(vd) {
+    const el = document.getElementById("stats-panel");
+    if (!el) return;
+    const flowVals = vd.flow.filter(v => v != null);
+    const wwlVals  = vd.wwl.filter(v => v != null);
+    const mn  = arr => arr.length ? Math.min(...arr) : null;
+    const mx  = arr => arr.length ? Math.max(...arr) : null;
+    const av  = arr => arr.length ? arr.reduce((a,b) => a+b,0) / arr.length : null;
+    const fmt = v => v == null ? "—" : v.toFixed(2);
+    const groups = [
+      { label: "Flow", unit: "MGD", stats: [["Min", mn(flowVals)], ["Avg", av(flowVals)], ["Max", mx(flowVals)]] },
+      { label: "WWL",  unit: "ft",  stats: [["Min", mn(wwlVals)],  ["Avg", av(wwlVals)],  ["Max", mx(wwlVals)]]  },
+    ];
+    el.innerHTML = groups.map((g, i) => `
+      ${i > 0 ? '<div class="stat-sep"></div>' : ''}
+      <div class="stat-group">
+        <div class="stat-group-label">${g.label}</div>
+        <div class="stat-items">
+          ${g.stats.map(([label, val]) => `
+            <div class="stat-item">
+              <div class="stat-item-label">${label}</div>
+              <div class="stat-item-value">${fmt(val)}<span class="stat-item-unit"> ${g.unit}</span></div>
+            </div>`).join("")}
+        </div>
+      </div>`).join("");
+  }
+
+  function renderSide(side, vd) {
+    const pg = PLANT_CONFIG.pumpGroups;
+    if (!pg) return;
+    const pumpIds = pg[side] || [];
+    const sideVd = {
+      ...vd,
+      pumps: vd.pumps.filter(p => pumpIds.includes(p)),
+      pump_status: Object.fromEntries(
+        vd.pumps.filter(p => pumpIds.includes(p)).map(p => [p, vd.pump_status[p]])
+      ),
+      wwl: vd["wwl_" + side] || vd.wwl,
+    };
+    const c1 = initChart("chart-" + side + "-flow", "wwtp");
+    if (c1) { c1.setOption(makeComboOption(sideVd, "flow", "Flow, MGD", FLOW_COLOR, 2, null)); attachMinuteHover("chart-" + side + "-flow", c1, sideVd.timestamps, sideVd.granularity); }
+    const c2 = initChart("chart-" + side + "-wwl", "wwtp");
+    if (c2) { c2.setOption(makeComboOption(sideVd, "wwl", "WWL, ft", WWL_COLOR, 2.5, null)); attachMinuteHover("chart-" + side + "-wwl", c2, sideVd.timestamps, sideVd.granularity); }
   }
 
   function renderActive() {
     const vd = getViewData();
     if (!vd) return;
+    const rainVd = getRainViewData();
+    renderStats(vd);
     const active = document.querySelector(".tab-pane.active");
     if (!active) return;
-    if (active.id === "tab-combined") renderCombined(vd);
-    else renderSeparate(vd);
+    if (active.id === "tab-combined") renderCombined(vd, rainVd);
+    else if (active.id === "tab-east")  renderSide("east", vd);
+    else if (active.id === "tab-west")  renderSide("west", vd);
+    else renderSeparate(vd, rainVd);
   }
 
   // ── Dropdowns ─────────────────────────────────────────────────────────────
@@ -434,11 +750,11 @@
     msMonth.setOptions(months.map(m => ({ value: m, label: MO[m-1] })));
   }
 
-  function populateDays(months) {
+  function populateDays(months, weeks) {
     if (!msDay || !yearData) return;
-    const src = months.length
-      ? yearData.timestamps.filter(ts => months.includes(+ts.substring(5,7)))
-      : yearData.timestamps;
+    let src = yearData.timestamps;
+    if (months && months.length) src = src.filter(ts => months.includes(+ts.substring(5,7)));
+    if (weeks  && weeks.length)  src = src.filter(ts => weeks.includes(isoWeek(ts)));
     const days = [...new Set(src.map(ts => +ts.substring(8,10)))].sort((a,b)=>a-b);
     msDay.setOptions(days.map(d => ({ value: d, label: String(d) })));
   }
@@ -455,6 +771,15 @@
   function setLoading(on) { const el = document.getElementById("loading-msg"); if (el) el.style.display = on ? "block" : "none"; }
   function setStatus(msg) { const el = document.getElementById("status-msg"); if (el) { el.textContent = msg; el.style.display = "block"; } }
   function hideStatus()   { const el = document.getElementById("status-msg"); if (el) el.style.display = "none"; }
+
+  function updateRainToggleUI() {
+    const btn = document.getElementById("btn-rain-toggle");
+    if (!btn) return;
+    const enabled = rainEnabled();
+    btn.disabled = !enabled;
+    btn.classList.toggle("is-on", enabled && sel.includeRain);
+    btn.setAttribute("aria-pressed", enabled && sel.includeRain ? "true" : "false");
+  }
 
   // ── Init ──────────────────────────────────────────────────────────────────
   async function init() {
@@ -473,33 +798,73 @@
     msYear = createMultiSelect("ms-year", "All Years", async years => {
       sel.years = years;
       minuteCache = {};
+      rainMinuteCache = {};
+
       await loadYears(years.length ? years : meta.years);
     }, { showAll: true });
 
-    msMonth = createMultiSelect("ms-month", "All Months", months => {
+    msMonth = createMultiSelect("ms-month", "All Months", async months => {
       sel.months = months;
       sel.days = []; sel.weeks = [];
       msDay.clear(); msWeek.clear();
-      populateDays(months);
+      populateDays(months, []);
       populateWeeks(months);
+
       renderActive();
+      if (months.length === 1 && sel.years.length === 1) {
+        const loaders = [loadMinuteData(sel.years[0], months[0])];
+        if (hasRain()) loaders.push(loadRainMinuteData(sel.years[0], months[0]));
+        const loaded = await Promise.all(loaders);
+        if (loaded.some(Boolean)) renderActive();
+      }
     }, { showAll: true });
 
-    msDay = createMultiSelect("ms-day", "All Days", async days => {
+    msDay = createMultiSelect("ms-day", "All Days", days => {
       sel.days = days;
+
       renderActive();
-      if (days.length === 1 && sel.months.length === 1) {
-        const loaded = await loadMinuteData(sel.years[0], sel.months[0]);
-        if (loaded) renderActive();
-      }
     }, { showAll: true });
 
     msWeek = createMultiSelect("ms-week", "All Weeks", weeks => {
       sel.weeks = weeks;
+      sel.days = [];
+      msDay.clear();
+      populateDays(sel.months, weeks);
       renderActive();
     }, { showAll: true });
 
-    // Populate year options and load the most recent year by default
+    if (hasRain()) {
+      msGauge = createMultiSelect("ms-gauge", "Gauge", async gauges => {
+        sel.gauges = gauges;
+        updateRainToggleUI();
+        renderActive();
+        if (gauges.length && sel.months.length === 1 && sel.years.length === 1) {
+          const loaded = await loadRainMinuteData(sel.years[0], sel.months[0]);
+          if (loaded) renderActive();
+        }
+      });
+      if (msGauge) {
+        const gaugeLabel = PLANT_CONFIG.rain.label
+          ? `${PLANT_CONFIG.rain.gauge} · ${PLANT_CONFIG.rain.label}`
+          : `Gauge ${PLANT_CONFIG.rain.gauge}`;
+        msGauge.setOptions([{ value: PLANT_CONFIG.rain.gauge, label: gaugeLabel }]);
+        sel.gauges = [PLANT_CONFIG.rain.gauge];
+        msGauge.setSelected(sel.gauges);
+      }
+    }
+
+    const rainToggleBtn = document.getElementById("btn-rain-toggle");
+    if (rainToggleBtn) {
+      rainToggleBtn.addEventListener("click", () => {
+        if (!rainEnabled()) return;
+        sel.includeRain = !sel.includeRain;
+        updateRainToggleUI();
+        renderActive();
+      });
+      updateRainToggleUI();
+    }
+
+    // Load most recent year, default to Jan 1 (shows minute level immediately)
     const sortedYears = meta.years.slice().sort((a,b) => b - a);
     msYear.setOptions(sortedYears.map(y => ({ value: y, label: String(y) })));
     const defaultYear = meta.years[meta.years.length - 1];
@@ -507,10 +872,20 @@
     msYear.setSelected([defaultYear]);
     await loadYears([defaultYear]);
 
+    // Default to January, Week 1
+    const week1 = isoWeek(`${defaultYear}-01-04 00:00`); // Jan 4 is always in ISO week 1
+    sel.months = [1]; sel.weeks = [week1];
+    msMonth.setSelected([1]);
+    populateWeeks([1]);
+    msWeek.setSelected([week1]);
+    populateDays([1], [week1]);
+    renderActive();
+
     document.getElementById("btn-reset").addEventListener("click", () => {
       sel.months = []; sel.days = []; sel.weeks = [];
       msMonth.clear(); msDay.clear(); msWeek.clear();
       populateDays([]);
+
       renderActive();
     });
 

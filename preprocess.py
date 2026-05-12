@@ -27,6 +27,15 @@ USE_S3     = True
 S3_BUCKET  = "aventdtlkps3stg01"
 S3_PREFIX  = "published/scada/summaries/archived/wwtp_wwl_pumpstatus_flow_consolidated/wwtp_flow_wwl_pumps_corrected"
 
+# Plants with east/west split: separate wwl_east/wwl_west arrays are output alongside combined wwl.
+# pump_groups defines which pump IDs belong to each side (matched against extracted PumpIDs).
+EW_SPLIT = {
+    "0006": {
+        "east_pumps": ["AELS_DP1", "AELS_DP2", "AELS_WP1", "AELS_WP2", "AELS_WP3"],
+        "west_pumps": ["ADP1", "ADP2", "AWP1", "AWP2", "AWP3"],
+    },
+}
+
 # All plants: (fid, display_name, slug, pump_file_fid, pump_tag_fid, wwl_file_fid, secondary_fid)
 # pump_file_fid:  overrides FID used to build the pumps parquet filename (None = same as fid)
 # pump_tag_fid:   overrides FID string used to split pump tagnames (None = same as pump_file_fid or fid)
@@ -117,6 +126,15 @@ def read_parquet(fid, kind):
     return df
 
 
+def read_parquet_sides(fid, kind):
+    """Read east and west parquet files separately. Returns (df_east, df_west)."""
+    def load(suffix):
+        df = pq.read_table(parquet_path(fid, kind + suffix)).to_pandas()
+        df["Timestamp"] = pd.to_datetime(df["Timestamp"], utc=False).dt.tz_localize(None)
+        return df
+    return load("_east"), load("_west")
+
+
 def process_plant(fid, plant_name, slug, pump_file_fid=None, pump_tag_fid=None, wwl_file_fid=None, secondary_fid=None):
     out_dir = OUTPUT_BASE / slug / "data"
     out_dir.mkdir(parents=True, exist_ok=True)
@@ -128,11 +146,18 @@ def process_plant(fid, plant_name, slug, pump_file_fid=None, pump_tag_fid=None, 
     print(f"  {plant_name}  (FID {fid})")
     print(f"{'='*60}")
 
+    ew = EW_SPLIT.get(fid)
+
     print("  Reading parquet files…")
     df_flow  = read_parquet(fid,  "flow").rename(columns={"Value": "Flow_MGD"})
     df_pumps = read_parquet(pfid, "pumps").rename(columns={"Value": "Pumps_status"})
     df_pumps["PumpID"] = df_pumps["Tagname"].apply(lambda t: extract_pump_id(t, ptfid))
     df_wwl   = read_parquet(wfid, "wwl").rename(columns={"Value": "WWL_ft"})
+
+    if ew:
+        df_wwl_east, df_wwl_west = read_parquet_sides(wfid, "wwl")
+        df_wwl_east = df_wwl_east.rename(columns={"Value": "WWL_ft"})
+        df_wwl_west = df_wwl_west.rename(columns={"Value": "WWL_ft"})
 
     if secondary_fid:
         df_pumps2 = read_parquet(secondary_fid, "pumps").rename(columns={"Value": "Pumps_status"})
@@ -152,6 +177,9 @@ def process_plant(fid, plant_name, slug, pump_file_fid=None, pump_tag_fid=None, 
     # ── Hourly series ─────────────────────────────────────────────────────────
     flow_h = df_flow.set_index("Timestamp")["Flow_MGD"].resample("1h").mean()
     wwl_h  = df_wwl.set_index("Timestamp")["WWL_ft"].resample("1h").mean()
+    if ew:
+        wwl_east_h = df_wwl_east.set_index("Timestamp")["WWL_ft"].resample("1h").mean()
+        wwl_west_h = df_wwl_west.set_index("Timestamp")["WWL_ft"].resample("1h").mean()
 
     pump_pivot   = df_pumps.pivot_table(
         index="Timestamp", columns="PumpID", values="Pumps_status", aggfunc="sum"
@@ -188,6 +216,9 @@ def process_plant(fid, plant_name, slug, pump_file_fid=None, pump_tag_fid=None, 
             "wwl":  [safe(v) for v in wwl_y.values],
             "pump_status": pump_data,
         }
+        if ew:
+            out["wwl_east"] = [safe(v) for v in wwl_east_h.reindex(idx).values]
+            out["wwl_west"] = [safe(v) for v in wwl_west_h.reindex(idx).values]
         p = out_dir / f"{year}.js"
         with open(p, "w") as f:
             f.write(f"window.__wwtp_year=window.__wwtp_year||{{}};window.__wwtp_year[{year}]={json.dumps(out, separators=(',', ':'))};")
@@ -196,6 +227,9 @@ def process_plant(fid, plant_name, slug, pump_file_fid=None, pump_tag_fid=None, 
     # ── Minute-level series ───────────────────────────────────────────────────
     flow_min = df_flow.set_index("Timestamp")["Flow_MGD"].resample("1min").mean()
     wwl_min  = df_wwl.set_index("Timestamp")["WWL_ft"].resample("1min").mean()
+    if ew:
+        wwl_east_min = df_wwl_east.set_index("Timestamp")["WWL_ft"].resample("1min").mean()
+        wwl_west_min = df_wwl_west.set_index("Timestamp")["WWL_ft"].resample("1min").mean()
     pump_min = df_pumps.pivot_table(
         index="Timestamp", columns="PumpID", values="Pumps_status", aggfunc="last"
     ).resample("1min").last()
@@ -228,6 +262,9 @@ def process_plant(fid, plant_name, slug, pump_file_fid=None, pump_tag_fid=None, 
             "wwl":  [safe(v) for v in wwl_m.values],
             "pump_status": {p: [safe(v) for v in pump_m[p].values] for p in active},
         }
+        if ew:
+            out["wwl_east"] = [safe(v) for v in wwl_east_min.reindex(idx).values]
+            out["wwl_west"] = [safe(v) for v in wwl_west_min.reindex(idx).values]
         key = f"{year}_{month:02d}"
         p = out_dir / f"{key}_min.js"
         with open(p, "w") as f:
@@ -237,6 +274,8 @@ def process_plant(fid, plant_name, slug, pump_file_fid=None, pump_tag_fid=None, 
 
     # ── meta.js + meta.json (meta.json kept for preprocess.py's landing page) ──
     meta = {"plant": plant_name, "fid": fid, "years": all_years, "pumps": pump_ids}
+    if ew:
+        meta["pump_groups"] = {"east": ew["east_pumps"], "west": ew["west_pumps"]}
     with open(out_dir / "meta.json", "w") as f:
         json.dump(meta, f, indent=2)
     with open(out_dir / "meta.js", "w") as f:

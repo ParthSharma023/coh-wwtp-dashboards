@@ -76,6 +76,39 @@
       padding: 0 26px 12px;
     }
     .back-link:hover { color: var(--text); }
+    .stats-inline {
+      margin-left: auto;
+      display: flex; align-items: center; gap: 16px;
+      padding-left: 18px;
+      border-left: 1px solid rgba(122,156,199,0.18);
+    }
+    .stat-group {
+      display: flex; align-items: center; gap: 8px;
+    }
+    .stat-group-label {
+      font-size: 10px; font-weight: 700; letter-spacing: 0.07em;
+      color: #48d0c9; text-transform: uppercase;
+    }
+    .stat-items {
+      display: flex; align-items: center; gap: 10px;
+    }
+    .stat-item {
+      display: flex; flex-direction: column; align-items: center;
+      background: rgba(16,32,50,0.6);
+      border: 1px solid rgba(108,143,186,0.15);
+      border-radius: 6px; padding: 3px 10px; min-width: 52px;
+    }
+    .stat-item-label {
+      font-size: 9px; font-weight: 600; letter-spacing: 0.06em;
+      color: var(--muted); text-transform: uppercase;
+    }
+    .stat-item-value {
+      font-size: 14px; font-weight: 700; color: var(--text); line-height: 1.3;
+    }
+    .stat-item-unit { font-size: 9px; color: var(--muted); }
+    .stat-sep {
+      width: 1px; height: 32px; background: rgba(122,156,199,0.15);
+    }
   </style>
 </head>
 <body>
@@ -118,6 +151,7 @@
       </div>
     </label>
     <button id="btn-reset" class="reset-btn">Reset</button>
+    <div id="stats-panel" class="stats-inline"></div>
   </div>
 
   <div class="subtabs">

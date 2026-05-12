@@ -137,6 +137,19 @@
     return mo[month] + " " + day + " " + ts.substring(11,16);
   }
 
+  function isoWeekInfo(ts) {
+    const d = new Date(ts.length === 10 ? ts + "T00:00" : ts.replace(" ", "T"));
+    d.setUTCDate(d.getUTCDate() + 4 - (d.getUTCDay() || 7));
+    const isoYear = d.getUTCFullYear();
+    const y = new Date(Date.UTC(isoYear, 0, 1));
+    const week = Math.ceil((((d - y) / 86400000) + 1) / 7);
+    return {
+      year: isoYear,
+      week,
+      key: `${isoYear}-W${String(week).padStart(2, "0")}`,
+    };
+  }
+
   // ── Year data loading + merging ───────────────────────────────────────────
   function mergeYearData(years) {
     const datasets = years.map(y => window.__wwtp_year && window.__wwtp_year[y]).filter(Boolean);
@@ -199,7 +212,7 @@
   }
 
   // ── Filter + aggregate ────────────────────────────────────────────────────
-  function getViewData() {
+  function getFilteredSlice() {
     if (!yearData) return null;
     const { months, days, weeks } = sel;
 
@@ -223,8 +236,22 @@
     const pumpFilt = {};
     pumps.forEach(p => { pumpFilt[p] = fi(pump_status[p]); });
 
-    if (!months.length && !weeks.length) return filterActivePumps(aggregateDaily(tsFilt, flowFilt, wwlFilt, pumpFilt, pumps));
-    return filterActivePumps({ timestamps: tsFilt, flow: flowFilt, wwl: wwlFilt, pump_status: pumpFilt, pumps, granularity: gran });
+    return { timestamps: tsFilt, flow: flowFilt, wwl: wwlFilt, pump_status: pumpFilt, pumps, granularity: gran };
+  }
+
+  function getViewData() {
+    const filtered = getFilteredSlice();
+    if (!filtered) return null;
+    if (!sel.months.length && !sel.weeks.length) {
+      return filterActivePumps(aggregateDaily(
+        filtered.timestamps,
+        filtered.flow,
+        filtered.wwl,
+        filtered.pump_status,
+        filtered.pumps
+      ));
+    }
+    return filterActivePumps(filtered);
   }
 
   function filterActivePumps(vd) {
@@ -389,6 +416,51 @@
     };
   }
 
+  function groupedStats(timestamps, values, keyFn) {
+    const buckets = {};
+    timestamps.forEach((ts, i) => {
+      const value = values[i];
+      if (value == null) return;
+      const key = keyFn(ts);
+      if (!buckets[key]) buckets[key] = [];
+      buckets[key].push(value);
+    });
+    return Object.keys(buckets)
+      .sort()
+      .map(key => {
+        const vals = buckets[key];
+        return {
+          min: Math.min(...vals),
+          mean: avg(vals),
+          max: Math.max(...vals),
+        };
+      })
+      .filter(stat => stat.mean != null);
+  }
+
+  function summarizeGroupedStats(timestamps, values, keyFn) {
+    const statsByGroup = groupedStats(timestamps, values, keyFn);
+    if (!statsByGroup.length) return { min: null, mean: null, max: null };
+    return {
+      min: Math.min(...statsByGroup.map(stat => stat.min)),
+      mean: avg(statsByGroup.map(stat => stat.mean)),
+      max: Math.max(...statsByGroup.map(stat => stat.max)),
+    };
+  }
+
+  function renderStatisticsPanel(slice) {
+    const fmt = v => v == null ? "—" : v.toFixed(2);
+    const set = (id, v) => { const el = document.getElementById(id); if (el) el.textContent = fmt(v); };
+    const daily  = ts => ts.substring(0, 10);
+    const weekly = ts => isoWeekInfo(ts).key;
+    for (const [sig, values] of [["flow", slice.flow], ["wwl", slice.wwl]]) {
+      const d = summarizeGroupedStats(slice.timestamps, values, daily);
+      const w = summarizeGroupedStats(slice.timestamps, values, weekly);
+      set(`stat-${sig}-d-min`,  d.min);  set(`stat-${sig}-d-mean`, d.mean);  set(`stat-${sig}-d-max`, d.max);
+      set(`stat-${sig}-w-min`,  w.min);  set(`stat-${sig}-w-mean`, w.mean);  set(`stat-${sig}-w-max`, w.max);
+    }
+  }
+
   // ── Render ────────────────────────────────────────────────────────────────
   function initChart(id) {
     const el = document.getElementById(id);
@@ -417,6 +489,9 @@
   }
 
   function renderActive() {
+    const slice = getFilteredSlice();
+    if (!slice) return;
+    renderStatisticsPanel(slice);
     const vd = getViewData();
     if (!vd) return;
     const active = document.querySelector(".tab-pane.active");

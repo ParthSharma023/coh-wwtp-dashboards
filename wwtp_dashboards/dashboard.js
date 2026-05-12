@@ -12,7 +12,7 @@
   ];
   const FLOW_COLOR  = "#f1f5fb";
   const LINE_WIDTHS = { flow: 2, wwl: 2.5 };
-  const WWL_COLOR   = "#f1f5fb";
+  const WWL_COLOR   = "#6ee7a0";
   const AXIS_COLOR  = "rgba(180,192,208,0.45)";
   const SPLIT_COLOR = "rgba(180,192,208,0.07)";
   const TIP_BG      = "#17273a";
@@ -22,6 +22,10 @@
   let yearData    = null;
   let minuteCache = {};
   let charts      = {};
+  let savedZoom   = null;
+  let rerendering = false;
+
+  const ZOOM_HOURLY_THRESHOLD = 60;
 
   // opts: { showAll: bool, minSelected: int }
   function createMultiSelect(id, placeholder, onChange, opts) {
@@ -180,6 +184,7 @@
       const data = mergeYearData(years);
       if (!data) throw new Error("Not found");
       yearData = data;
+      savedZoom = null;
       sel.months = []; sel.days = []; sel.weeks = [];
       if (msMonth) msMonth.clear();
       if (msDay)   msDay.clear();
@@ -239,10 +244,17 @@
     return { timestamps: tsFilt, flow: flowFilt, wwl: wwlFilt, pump_status: pumpFilt, pumps, granularity: gran };
   }
 
+  function visibleDays() {
+    if (!savedZoom || !yearData) return Infinity;
+    const totalDays = new Set(yearData.timestamps.map(ts => ts.substring(0, 10))).size;
+    return (savedZoom.end - savedZoom.start) / 100 * totalDays;
+  }
+
   function getViewData() {
     const filtered = getFilteredSlice();
     if (!filtered) return null;
     if (!sel.months.length && !sel.weeks.length) {
+      if (visibleDays() <= ZOOM_HOURLY_THRESHOLD) return filterActivePumps(filtered);
       return filterActivePumps(aggregateDaily(
         filtered.timestamps,
         filtered.flow,
@@ -278,8 +290,8 @@
     pumps.forEach(p => { pumpFilt[p] = days.map(d => maxVal(B[d].pumps[p])); });
     return {
       timestamps: days,
-      flow:        days.map(d => avg(B[d].flow)),
-      wwl:         days.map(d => avg(B[d].wwl)),
+      flow:        days.map(d => maxVal(B[d].flow)),
+      wwl:         days.map(d => maxVal(B[d].wwl)),
       pump_status: pumpFilt,
       pumps,
       granularity: "daily",
@@ -320,10 +332,12 @@
   }
 
   function dataZoom(timestamps, granularity) {
+    const start = savedZoom ? savedZoom.start : 0;
+    const end   = savedZoom ? savedZoom.end   : 100;
     return [
-      { type: "inside", xAxisIndex: 0, start: 0, end: 100 },
+      { type: "inside", xAxisIndex: 0, start, end },
       {
-        type: "slider", xAxisIndex: 0, height: 18, bottom: 4, start: 0, end: 100,
+        type: "slider", xAxisIndex: 0, height: 18, bottom: 4, start, end,
         fillerColor: "rgba(93,168,255,0.12)", borderColor: TIP_BORDER,
         textStyle: { color: "#b4c0d0", fontSize: 10 },
       },
@@ -412,7 +426,9 @@
       dataZoom: dataZoom(timestamps, granularity),
       xAxis: xAxisOpt(timestamps, granularity),
       yAxis: { ...yAxisLeft(yLabel), min: undefined },
-      series: [{ type: "bar", data: values, itemStyle: { color }, barMaxWidth: 24 }],
+      series: [{
+        type: "bar", data: values, itemStyle: { color }, barMaxWidth: 24,
+      }],
     };
   }
 
@@ -472,9 +488,27 @@
     return charts[id];
   }
 
+  function attachZoomListener(chart) {
+    if (!chart) return;
+    chart.on("dataZoom", e => {
+      if (rerendering) return;
+      const batch  = e.batch && e.batch[0];
+      const start  = batch ? batch.start  : (e.start  ?? savedZoom?.start ?? 0);
+      const end    = batch ? batch.end    : (e.end    ?? savedZoom?.end   ?? 100);
+      const wasHourly = savedZoom && visibleDays() <= ZOOM_HOURLY_THRESHOLD;
+      savedZoom = { start, end };
+      const isHourly = visibleDays() <= ZOOM_HOURLY_THRESHOLD;
+      if (wasHourly !== isHourly && !sel.months.length && !sel.weeks.length) {
+        rerendering = true;
+        renderActive();
+        rerendering = false;
+      }
+    });
+  }
+
   function renderCombined(vd) {
     const c1 = initChart("chart-flow");
-    if (c1) c1.setOption(makeComboOption(vd, "flow", "Flow, MGD", FLOW_COLOR, 2));
+    if (c1) { c1.setOption(makeComboOption(vd, "flow", "Flow, MGD", FLOW_COLOR, 2)); attachZoomListener(c1); }
     const c2 = initChart("chart-wwl");
     if (c2) c2.setOption(makeComboOption(vd, "wwl", "WWL, ft", WWL_COLOR, 2.5));
   }
@@ -485,7 +519,7 @@
     const c2 = initChart("chart-sep-wwl");
     if (c2) c2.setOption(makeSingleOption(vd.timestamps, vd.wwl, WWL_COLOR, "WWL, ft", vd.granularity));
     const c3 = initChart("chart-sep-flow");
-    if (c3) c3.setOption(makeSingleOption(vd.timestamps, vd.flow, FLOW_COLOR, "Flow, MGD", vd.granularity));
+    if (c3) { c3.setOption(makeSingleOption(vd.timestamps, vd.flow, FLOW_COLOR, "Flow, MGD", vd.granularity)); attachZoomListener(c3); }
   }
 
   function renderActive() {

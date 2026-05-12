@@ -13,7 +13,7 @@
   const FLOW_COLOR  = "#f1f5fb";
   const LINE_WIDTHS = { flow: 2, wwl: 2.5 };
   const RAIN_COLOR  = "#48d0c9";
-  const WWL_COLOR   = "#f1f5fb";
+  const WWL_COLOR   = "#6ee7a0";
   const AXIS_COLOR  = "rgba(180,192,208,0.45)";
   const SPLIT_COLOR = "rgba(180,192,208,0.07)";
   const TIP_BG      = "#17273a";
@@ -25,6 +25,10 @@
   let yearData    = null;
   let minuteCache = {};
   let charts      = {};
+  let savedZoom   = null;
+  let rerendering = false;
+
+  const ZOOM_HOURLY_THRESHOLD = 60;
 
   // opts: { showAll: bool, minSelected: int }
   function createMultiSelect(id, placeholder, onChange, opts) {
@@ -150,6 +154,19 @@
     return prefix + String(Math.floor(minute / 5) * 5).padStart(2, "0");
   }
 
+  function isoWeekInfo(ts) {
+    const d = new Date(ts.length === 10 ? ts + "T00:00" : ts.replace(" ", "T"));
+    d.setUTCDate(d.getUTCDate() + 4 - (d.getUTCDay() || 7));
+    const isoYear = d.getUTCFullYear();
+    const y = new Date(Date.UTC(isoYear, 0, 1));
+    const week = Math.ceil((((d - y) / 86400000) + 1) / 7);
+    return {
+      year: isoYear,
+      week,
+      key: `${isoYear}-W${String(week).padStart(2, "0")}`,
+    };
+  }
+
   // ── Year data loading + merging ───────────────────────────────────────────
   function mergeYearData(years) {
     const datasets = years.map(y => window.__wwtp_year && window.__wwtp_year[y]).filter(Boolean);
@@ -214,6 +231,7 @@
       if (!data) throw new Error("Not found");
       yearData = data;
       await loadRainYears(years);
+      savedZoom = null;
       sel.months = []; sel.days = []; sel.weeks = [];
       if (msMonth) msMonth.clear();
       if (msDay)   msDay.clear();
@@ -281,7 +299,7 @@
   }
 
   // ── Filter + aggregate ────────────────────────────────────────────────────
-  function getViewData() {
+  function getFilteredSlice() {
     if (!yearData) return null;
     const { months, days, weeks } = sel;
 
@@ -310,8 +328,36 @@
     const extra = {};
     if (wwlEastFilt) { extra.wwl_east = wwlEastFilt; extra.wwl_west = wwlWestFilt; }
 
-    if (!months.length && !weeks.length) return filterActivePumps({ ...aggregateDaily(tsFilt, flowFilt, wwlFilt, pumpFilt, pumps), ...extra });
-    return filterActivePumps({ timestamps: tsFilt, flow: flowFilt, wwl: wwlFilt, pump_status: pumpFilt, pumps, granularity: gran, ...extra });
+    return { timestamps: tsFilt, flow: flowFilt, wwl: wwlFilt, pump_status: pumpFilt, pumps, granularity: gran, ...extra };
+  }
+
+  function visibleDays() {
+    if (!savedZoom || !yearData) return Infinity;
+    const totalDays = new Set(yearData.timestamps.map(ts => ts.substring(0, 10))).size;
+    return (savedZoom.end - savedZoom.start) / 100 * totalDays;
+  }
+
+  function getViewData() {
+    const filtered = getFilteredSlice();
+    if (!filtered) return null;
+    if (!sel.months.length && !sel.weeks.length) {
+      if (visibleDays() <= ZOOM_HOURLY_THRESHOLD) return filterActivePumps(filtered);
+      const daily = aggregateDaily(filtered.timestamps, filtered.flow, filtered.wwl, filtered.pump_status, filtered.pumps);
+      if (filtered.wwl_east) {
+        const B = {};
+        filtered.timestamps.forEach((ts, i) => {
+          const day = ts.substring(0, 10);
+          if (!B[day]) B[day] = { east: [], west: [] };
+          if (filtered.wwl_east[i] != null) B[day].east.push(filtered.wwl_east[i]);
+          if (filtered.wwl_west[i] != null) B[day].west.push(filtered.wwl_west[i]);
+        });
+        const maxVal2 = arr => arr.length ? Math.max(...arr) : null;
+        daily.wwl_east = daily.timestamps.map(d => maxVal2(B[d] ? B[d].east : []));
+        daily.wwl_west = daily.timestamps.map(d => maxVal2(B[d] ? B[d].west : []));
+      }
+      return filterActivePumps(daily);
+    }
+    return filterActivePumps(filtered);
   }
 
   function getRainViewData() {
@@ -373,8 +419,8 @@
     pumps.forEach(p => { pumpFilt[p] = days.map(d => maxVal(B[d].pumps[p])); });
     return {
       timestamps: days,
-      flow:        days.map(d => avg(B[d].flow)),
-      wwl:         days.map(d => avg(B[d].wwl)),
+      flow:        days.map(d => maxVal(B[d].flow)),
+      wwl:         days.map(d => maxVal(B[d].wwl)),
       pump_status: pumpFilt,
       pumps,
       granularity: "daily",
@@ -429,10 +475,12 @@
   }
 
   function dataZoom(timestamps, granularity) {
+    const start = savedZoom ? savedZoom.start : 0;
+    const end   = savedZoom ? savedZoom.end   : 100;
     return [
-      { type: "inside", xAxisIndex: 0, start: 0, end: 100 },
+      { type: "inside", xAxisIndex: 0, start, end },
       {
-        type: "slider", xAxisIndex: 0, height: 18, bottom: 4, start: 0, end: 100,
+        type: "slider", xAxisIndex: 0, height: 18, bottom: 4, start, end,
         fillerColor: "rgba(93,168,255,0.12)", borderColor: TIP_BORDER,
         textStyle: { color: "#b4c0d0", fontSize: 10 },
       },
@@ -626,7 +674,9 @@
       dataZoom: dataZoom(timestamps, granularity),
       xAxis: xAxisOpt(timestamps, granularity),
       yAxis: { ...yAxisLeft(yLabel), min: undefined },
-      series: [{ type: "bar", data: values, itemStyle: { color }, barMaxWidth: 24 }],
+      series: [{
+        type: "bar", data: values, itemStyle: { color }, barMaxWidth: 24,
+      }],
     };
   }
 
@@ -642,6 +692,51 @@
     };
   }
 
+  function groupedStats(timestamps, values, keyFn) {
+    const buckets = {};
+    timestamps.forEach((ts, i) => {
+      const value = values[i];
+      if (value == null) return;
+      const key = keyFn(ts);
+      if (!buckets[key]) buckets[key] = [];
+      buckets[key].push(value);
+    });
+    return Object.keys(buckets)
+      .sort()
+      .map(key => {
+        const vals = buckets[key];
+        return {
+          min: Math.min(...vals),
+          mean: avg(vals),
+          max: Math.max(...vals),
+        };
+      })
+      .filter(stat => stat.mean != null);
+  }
+
+  function summarizeGroupedStats(timestamps, values, keyFn) {
+    const statsByGroup = groupedStats(timestamps, values, keyFn);
+    if (!statsByGroup.length) return { min: null, mean: null, max: null };
+    return {
+      min: Math.min(...statsByGroup.map(stat => stat.min)),
+      mean: avg(statsByGroup.map(stat => stat.mean)),
+      max: Math.max(...statsByGroup.map(stat => stat.max)),
+    };
+  }
+
+  function renderStatisticsPanel(slice) {
+    const fmt = v => v == null ? "—" : v.toFixed(2);
+    const set = (id, v) => { const el = document.getElementById(id); if (el) el.textContent = fmt(v); };
+    const daily  = ts => ts.substring(0, 10);
+    const weekly = ts => isoWeekInfo(ts).key;
+    for (const [sig, values] of [["flow", slice.flow], ["wwl", slice.wwl]]) {
+      const d = summarizeGroupedStats(slice.timestamps, values, daily);
+      const w = summarizeGroupedStats(slice.timestamps, values, weekly);
+      set(`stat-${sig}-d-min`,  d.min);  set(`stat-${sig}-d-mean`, d.mean);  set(`stat-${sig}-d-max`, d.max);
+      set(`stat-${sig}-w-min`,  w.min);  set(`stat-${sig}-w-mean`, w.mean);  set(`stat-${sig}-w-max`, w.max);
+    }
+  }
+
   // ── Render ────────────────────────────────────────────────────────────────
   function initChart(id, groupName) {
     const el = document.getElementById(id);
@@ -655,20 +750,35 @@
     return charts[id];
   }
 
+  function attachZoomListener(chart) {
+    if (!chart) return;
+    chart.on("dataZoom", e => {
+      if (rerendering) return;
+      const batch  = e.batch && e.batch[0];
+      const start  = batch ? batch.start  : (e.start  ?? savedZoom?.start ?? 0);
+      const end    = batch ? batch.end    : (e.end    ?? savedZoom?.end   ?? 100);
+      const wasHourly = savedZoom && visibleDays() <= ZOOM_HOURLY_THRESHOLD;
+      savedZoom = { start, end };
+      const isHourly = visibleDays() <= ZOOM_HOURLY_THRESHOLD;
+      if (wasHourly !== isHourly && !sel.months.length && !sel.weeks.length) {
+        rerendering = true;
+        renderActive();
+        rerendering = false;
+      }
+    });
+  }
+
   function renderRainChart(id, rainVd) {
     const c = initChart(id, "wwtp-rain");
     if (!c) return;
-    if (!rainVd) {
-      c.clear();
-      return;
-    }
+    if (!rainVd) { c.clear(); return; }
     c.setOption(makeRainOption(rainVd));
   }
 
   function renderCombined(vd, rainVd) {
     const c1 = initChart("chart-flow", "wwtp");
     const combinedRain = showRainOverlay() ? rainVd : null;
-    if (c1) { c1.setOption(makeComboOption(vd, "flow", "Flow, MGD", FLOW_COLOR, 2, combinedRain)); attachMinuteHover("chart-flow", c1, vd.timestamps, vd.granularity); }
+    if (c1) { c1.setOption(makeComboOption(vd, "flow", "Flow, MGD", FLOW_COLOR, 2, combinedRain)); attachMinuteHover("chart-flow", c1, vd.timestamps, vd.granularity); attachZoomListener(c1); }
     const c2 = initChart("chart-wwl", "wwtp");
     if (c2) { c2.setOption(makeComboOption(vd, "wwl", "WWL, ft", WWL_COLOR, 2.5, combinedRain)); attachMinuteHover("chart-wwl", c2, vd.timestamps, vd.granularity); }
   }
@@ -679,35 +789,8 @@
     const c2 = initChart("chart-sep-wwl", "wwtp");
     if (c2) { c2.setOption(makeSingleOption(vd.timestamps, vd.wwl, WWL_COLOR, "WWL, ft", vd.granularity)); attachMinuteHover("chart-sep-wwl", c2, vd.timestamps, vd.granularity); }
     const c3 = initChart("chart-sep-flow", "wwtp");
-    if (c3) { c3.setOption(makeSingleOption(vd.timestamps, vd.flow, FLOW_COLOR, "Flow, MGD", vd.granularity)); attachMinuteHover("chart-sep-flow", c3, vd.timestamps, vd.granularity); }
+    if (c3) { c3.setOption(makeSingleOption(vd.timestamps, vd.flow, FLOW_COLOR, "Flow, MGD", vd.granularity)); attachMinuteHover("chart-sep-flow", c3, vd.timestamps, vd.granularity); attachZoomListener(c3); }
     renderRainChart("chart-sep-rain", rainVd);
-  }
-
-  function renderStats(vd) {
-    const el = document.getElementById("stats-panel");
-    if (!el) return;
-    const flowVals = vd.flow.filter(v => v != null);
-    const wwlVals  = vd.wwl.filter(v => v != null);
-    const mn  = arr => arr.length ? Math.min(...arr) : null;
-    const mx  = arr => arr.length ? Math.max(...arr) : null;
-    const av  = arr => arr.length ? arr.reduce((a,b) => a+b,0) / arr.length : null;
-    const fmt = v => v == null ? "—" : v.toFixed(2);
-    const groups = [
-      { label: "Flow", unit: "MGD", stats: [["Min", mn(flowVals)], ["Avg", av(flowVals)], ["Max", mx(flowVals)]] },
-      { label: "WWL",  unit: "ft",  stats: [["Min", mn(wwlVals)],  ["Avg", av(wwlVals)],  ["Max", mx(wwlVals)]]  },
-    ];
-    el.innerHTML = groups.map((g, i) => `
-      ${i > 0 ? '<div class="stat-sep"></div>' : ''}
-      <div class="stat-group">
-        <div class="stat-group-label">${g.label}</div>
-        <div class="stat-items">
-          ${g.stats.map(([label, val]) => `
-            <div class="stat-item">
-              <div class="stat-item-label">${label}</div>
-              <div class="stat-item-value">${fmt(val)}<span class="stat-item-unit"> ${g.unit}</span></div>
-            </div>`).join("")}
-        </div>
-      </div>`).join("");
   }
 
   function renderSide(side, vd) {
@@ -729,10 +812,12 @@
   }
 
   function renderActive() {
+    const slice = getFilteredSlice();
+    if (!slice) return;
+    renderStatisticsPanel(slice);
     const vd = getViewData();
     if (!vd) return;
     const rainVd = getRainViewData();
-    renderStats(vd);
     const active = document.querySelector(".tab-pane.active");
     if (!active) return;
     if (active.id === "tab-combined") renderCombined(vd, rainVd);

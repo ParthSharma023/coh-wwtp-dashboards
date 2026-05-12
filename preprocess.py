@@ -106,7 +106,13 @@ def parquet_path(fid, kind):
 
 def read_parquet(fid, kind):
     path = parquet_path(fid, kind)
-    df = pq.read_table(path).to_pandas()
+    try:
+        df = pq.read_table(path).to_pandas()
+    except Exception:
+        # Some plants (e.g. Almeda Sims) split into _east/_west files
+        east = pq.read_table(parquet_path(fid, kind + "_east")).to_pandas()
+        west = pq.read_table(parquet_path(fid, kind + "_west")).to_pandas()
+        df = pd.concat([east, west], ignore_index=True)
     df["Timestamp"] = pd.to_datetime(df["Timestamp"], utc=False).dt.tz_localize(None)
     return df
 

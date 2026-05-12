@@ -29,7 +29,9 @@
   let rerendering = false;
   let selectedSide = PLANT_CONFIG.pumpGroups ? "east" : null;
 
-  const ZOOM_HOURLY_THRESHOLD = 60;
+  const ZOOM_DAILY_THRESHOLD = 14;
+  const ZOOM_MINUTE_THRESHOLD = 3;
+  const MINUTE_MONTH_LIMIT = 3;
 
   // opts: { showAll: bool, minSelected: int }
   function createMultiSelect(id, placeholder, onChange, opts) {
@@ -148,6 +150,25 @@
     return mo[month] + " " + day + " " + ts.substring(11,16);
   }
 
+  function fmtAxisValue(value, granularity) {
+    if (typeof value === "string") {
+      return value.length >= 10 ? fmtLabel(value, granularity) : value;
+    }
+    if (typeof value !== "number") return String(value);
+    const d = new Date(value);
+    const mo = ["Jan","Feb","Mar","Apr","May","Jun","Jul","Aug","Sep","Oct","Nov","Dec"];
+    const label = `${mo[d.getMonth()]} ${d.getDate()}`;
+    if (granularity === "daily") return label;
+    return `${label} ${String(d.getHours()).padStart(2, "0")}:${String(d.getMinutes()).padStart(2, "0")}`;
+  }
+
+  function toTimeValue(ts) {
+    if (typeof ts === "number") return ts;
+    if (!ts) return ts;
+    const normalized = ts.length === 10 ? `${ts}T00:00` : ts.replace(" ", "T");
+    return new Date(normalized).getTime();
+  }
+
   function floorToFiveMinute(ts) {
     if (!ts || ts.length < 16) return ts;
     const prefix = ts.substring(0, 14);
@@ -264,10 +285,58 @@
     finally { delete minuteCache[key + "_loading"]; }
   }
 
+  function minuteKeys() {
+    if (sel.years.length !== 1 || !sel.months.length || sel.months.length > MINUTE_MONTH_LIMIT) return null;
+    const year = sel.years[0];
+    return sel.months.slice().sort((a, b) => a - b).map(month =>
+      `${year}_${String(month).padStart(2, "0")}`
+    );
+  }
+
   function minuteKey() {
-    return (sel.years.length === 1 && sel.months.length === 1)
-      ? `${sel.years[0]}_${String(sel.months[0]).padStart(2, "0")}`
-      : null;
+    const keys = minuteKeys();
+    return keys && keys.length === 1 ? keys[0] : null;
+  }
+
+  function mergeMinuteData(keys) {
+    const datasets = keys.map(key => minuteCache[key]).filter(Boolean);
+    if (!datasets.length) return null;
+    if (datasets.length === 1) return datasets[0];
+
+    const allPumps = [...new Set(datasets.flatMap(d => d.pumps || []))].sort();
+    return {
+      year: datasets[0].year,
+      month: null,
+      pumps: allPumps,
+      timestamps: datasets.flatMap(d => d.timestamps),
+      flow: datasets.flatMap(d => d.flow),
+      wwl: datasets.flatMap(d => d.wwl),
+      wwl_east: datasets.flatMap(d => d.wwl_east || new Array(d.timestamps.length).fill(null)),
+      wwl_west: datasets.flatMap(d => d.wwl_west || new Array(d.timestamps.length).fill(null)),
+      pump_status: Object.fromEntries(allPumps.map(p => [
+        p,
+        datasets.flatMap(d => d.pump_status[p] || new Array(d.timestamps.length).fill(null)),
+      ])),
+    };
+  }
+
+  async function loadMinuteRange() {
+    const keys = minuteKeys();
+    if (!keys) return [];
+    return Promise.all(keys.map(key => {
+      if (minuteCache[key]) return Promise.resolve(minuteCache[key]);
+      const [year, month] = key.split("_");
+      return loadMinuteData(+year, +month);
+    }));
+  }
+
+  async function preloadSelectedDetailData() {
+    const loaders = [];
+    if (minuteKeys()) loaders.push(loadMinuteRange());
+    if (hasRain() && sel.years.length === 1 && sel.months.length === 1) {
+      loaders.push(loadRainMinuteData(sel.years[0], sel.months[0]));
+    }
+    return loaders.length ? Promise.all(loaders) : [];
   }
 
   async function loadRainMinuteData(year, month) {
@@ -300,13 +369,9 @@
   }
 
   // ── Filter + aggregate ────────────────────────────────────────────────────
-  function getFilteredSlice() {
+  function filterSourceSlice(src) {
     if (!yearData) return null;
     const { months, days, weeks } = sel;
-
-    const mk = minuteKey();
-    const useMins = days.length === 1 && months.length === 1 && mk && minuteCache[mk];
-    const src = useMins ? { ...minuteCache[mk], granularity: "minute" } : yearData;
     const { timestamps, flow, wwl, pump_status, pumps } = src;
     const gran = src.granularity || "hourly";
 
@@ -332,33 +397,71 @@
     return { timestamps: tsFilt, flow: flowFilt, wwl: wwlFilt, pump_status: pumpFilt, pumps, granularity: gran, ...extra };
   }
 
-  function visibleDays() {
-    if (!savedZoom || !yearData) return Infinity;
-    const totalDays = new Set(yearData.timestamps.map(ts => ts.substring(0, 10))).size;
-    return (savedZoom.end - savedZoom.start) / 100 * totalDays;
+  function getBaseFilteredSlice() {
+    return filterSourceSlice(yearData);
+  }
+
+  function visibleDays(slice, zoom) {
+    if (!slice || !slice.timestamps || !slice.timestamps.length) return 0;
+    const totalDays = new Set(slice.timestamps.map(ts => ts.substring(0, 10))).size;
+    const activeZoom = zoom === undefined ? savedZoom : zoom;
+    if (!activeZoom) return totalDays;
+    return (activeZoom.end - activeZoom.start) / 100 * totalDays;
+  }
+
+  function getResolutionMode(baseSlice, zoom) {
+    const days = visibleDays(baseSlice, zoom);
+    if (days > ZOOM_DAILY_THRESHOLD) return "daily";
+    if (days >= ZOOM_MINUTE_THRESHOLD) return "hourly";
+    if (minuteKeys()) return "minute";
+    return "hourly";
+  }
+
+  function getFilteredSlice() {
+    const baseSlice = getBaseFilteredSlice();
+    if (!baseSlice) return null;
+
+    if (getResolutionMode(baseSlice) !== "minute") return baseSlice;
+
+    const keys = minuteKeys();
+    const minuteData = keys && mergeMinuteData(keys);
+    if (!minuteData) return baseSlice;
+
+    return filterSourceSlice({ ...minuteData, granularity: "minute" });
+  }
+
+  function getFlowChartData() {
+    const keys = minuteKeys();
+    if (keys) {
+      const minuteData = mergeMinuteData(keys);
+      if (minuteData) return filterSourceSlice({ ...minuteData, granularity: "minute" });
+    }
+    return getFilteredSlice();
   }
 
   function getViewData() {
+    const baseSlice = getBaseFilteredSlice();
+    if (!baseSlice) return null;
+
+    const resolution = getResolutionMode(baseSlice);
     const filtered = getFilteredSlice();
     if (!filtered) return null;
-    if (!sel.months.length && !sel.weeks.length) {
-      if (visibleDays() <= ZOOM_HOURLY_THRESHOLD) return filterActivePumps(filtered);
-      const daily = aggregateDaily(filtered.timestamps, filtered.flow, filtered.wwl, filtered.pump_status, filtered.pumps);
-      if (filtered.wwl_east) {
-        const B = {};
-        filtered.timestamps.forEach((ts, i) => {
-          const day = ts.substring(0, 10);
-          if (!B[day]) B[day] = { east: [], west: [] };
-          if (filtered.wwl_east[i] != null) B[day].east.push(filtered.wwl_east[i]);
-          if (filtered.wwl_west[i] != null) B[day].west.push(filtered.wwl_west[i]);
-        });
-        const maxVal2 = arr => arr.length ? Math.max(...arr) : null;
-        daily.wwl_east = daily.timestamps.map(d => maxVal2(B[d] ? B[d].east : []));
-        daily.wwl_west = daily.timestamps.map(d => maxVal2(B[d] ? B[d].west : []));
-      }
-      return filterActivePumps(daily);
+    if (resolution !== "daily") return filterActivePumps(filtered);
+
+    const daily = aggregateDaily(baseSlice.timestamps, baseSlice.flow, baseSlice.wwl, baseSlice.pump_status, baseSlice.pumps);
+    if (baseSlice.wwl_east) {
+      const B = {};
+      baseSlice.timestamps.forEach((ts, i) => {
+        const day = ts.substring(0, 10);
+        if (!B[day]) B[day] = { east: [], west: [] };
+        if (baseSlice.wwl_east[i] != null) B[day].east.push(baseSlice.wwl_east[i]);
+        if (baseSlice.wwl_west[i] != null) B[day].west.push(baseSlice.wwl_west[i]);
+      });
+      const maxVal2 = arr => arr.length ? Math.max(...arr) : null;
+      daily.wwl_east = daily.timestamps.map(d => maxVal2(B[d] ? B[d].east : []));
+      daily.wwl_west = daily.timestamps.map(d => maxVal2(B[d] ? B[d].west : []));
     }
-    return filterActivePumps(filtered);
+    return filterActivePumps(daily);
   }
 
   function getRainViewData() {
@@ -446,6 +549,28 @@
     };
   }
 
+  function timeXAxisOpt(granularity) {
+    const mo = ["Jan","Feb","Mar","Apr","May","Jun","Jul","Aug","Sep","Oct","Nov","Dec"];
+    return {
+      type: "time",
+      axisLabel: {
+        color: "#b4c0d0",
+        fontSize: 11,
+        formatter: value => {
+          const d = new Date(value);
+          const label = `${mo[d.getMonth()]} ${d.getDate()}`;
+          if (granularity === "minute" || granularity === "hourly") {
+            return `${label} ${String(d.getHours()).padStart(2, "0")}:00`;
+          }
+          return label;
+        },
+      },
+      axisLine:  { lineStyle: { color: AXIS_COLOR } },
+      axisTick:  { lineStyle: { color: AXIS_COLOR } },
+      splitLine: { show: false },
+    };
+  }
+
   function yAxisLeft(name) {
     return {
       type: "value", name, min: 0,
@@ -498,6 +623,7 @@
       prev.dom.removeEventListener("mouseleave", prev.leave);
     }
     if (granularity === "minute") {
+      hoveredMinuteTs = null;
       _minHoverListeners[chartId] = null;
       return;
     }
@@ -553,6 +679,7 @@
     opts = opts || {};
     const rainLookup = opts.rainLookup || null;
     const rainGranularity = opts.rainGranularity || null;
+    const granularity = opts.granularity || null;
     const rainSeriesName = "Rain, in";
     return {
       trigger: "axis",
@@ -563,7 +690,7 @@
         const canUseMinuteHover = params.some(p =>
           p.seriesName === "Flow, MGD" || p.seriesName === "WWL, ft"
         );
-        const hm = canUseMinuteHover ? hoveredMinuteTs : null;
+        const hm = canUseMinuteHover && granularity !== "minute" ? hoveredMinuteTs : null;
         const axisTs = params[0].axisValue;
         const ts = (hm && hm.ts) || axisTs;
         let out = '<div style="margin-bottom:4px;font-weight:600">' + ts + '</div>';
@@ -612,7 +739,7 @@
     const legendNames = rain ? [...pumps, "Rain, in", overlayName] : [...pumps, overlayName];
     return {
       backgroundColor: "transparent",
-      tooltip: tooltip({ rainLookup: rain && rain.lookup, rainGranularity: rain && rain.granularity }),
+      tooltip: tooltip({ rainLookup: rain && rain.lookup, rainGranularity: rain && rain.granularity, granularity }),
       legend: legend(legendNames),
       grid: { left: 70, right: 70, top: 44, bottom: 52 },
       dataZoom: dataZoom(timestamps, granularity),
@@ -625,7 +752,7 @@
             color: PUMP_COLORS[i % PUMP_COLORS.length],
             opacity: rainFocus ? 0.26 : 1,
           },
-          data: pump_status[pid], barMaxWidth: 24,
+          data: pump_status[pid], barMaxWidth: granularity === "minute" ? 6 : 24,
           z: 1,
         })),
         ...(rain ? [{
@@ -649,11 +776,81 @@
     };
   }
 
+  function makeMixedComboOption(vd, overlayVd, overlayName, overlayColor, lineWidth) {
+    const { timestamps, pump_status, pumps, granularity } = vd;
+    const overlayTs = overlayVd.timestamps;
+    const overlay = overlayVd.flow;
+    const renderMinutePumps = !!(
+      overlayVd.granularity === "minute" &&
+      overlayVd.pump_status &&
+      overlayTs.length <= 50000
+    );
+    const pumpTs = renderMinutePumps ? overlayTs : timestamps;
+    const pumpSource = renderMinutePumps ? overlayVd : vd;
+    const pumpBarWidth = renderMinutePumps ? 6 : (granularity === "daily" ? 36 : 12);
+    const tooltipFormatter = params => {
+      if (!params.length) return "";
+      const ts = fmtAxisValue(params[0].axisValue, overlayVd.granularity);
+      let out = '<div style="margin-bottom:4px;font-weight:600">' + ts + '</div>';
+      params.forEach(p => {
+        if (p.value == null || p.value === "-") return;
+        const raw = Array.isArray(p.value) ? p.value[1] : p.value;
+        if (raw == null) return;
+        const v = typeof raw === "number"
+          ? (Number.isInteger(raw) ? raw : +raw.toFixed(2))
+          : raw;
+        out += p.marker + " " + p.seriesName + "&nbsp;&nbsp;<b>" + v + "</b><br/>";
+      });
+      return out;
+    };
+
+    return {
+      backgroundColor: "transparent",
+      tooltip: {
+        trigger: "axis",
+        backgroundColor: TIP_BG,
+        borderColor: TIP_BORDER,
+        textStyle: { color: "#eff5fb", fontSize: 12 },
+        axisPointer: { type: "line" },
+        formatter: tooltipFormatter,
+      },
+      legend: legend([...pumps, overlayName]),
+      grid: { left: 70, right: 70, top: 44, bottom: 52 },
+      dataZoom: dataZoom(overlayTs, overlayVd.granularity),
+      xAxis: timeXAxisOpt(overlayVd.granularity),
+      yAxis: [yAxisLeft("Pump Status (0/1)"), yAxisRight(overlayName)],
+      series: [
+        ...pumps.map((pid, i) => ({
+          name: pid,
+          type: "bar",
+          stack: "pumps",
+          yAxisIndex: 0,
+          itemStyle: { color: PUMP_COLORS[i % PUMP_COLORS.length] },
+          data: pumpTs.map((ts, idx) => [toTimeValue(ts), (pumpSource.pump_status[pid] || [])[idx]]),
+          barWidth: pumpBarWidth,
+          z: 1,
+        })),
+        {
+          name: overlayName,
+          type: "line",
+          yAxisIndex: 1,
+          data: overlayTs.map((ts, idx) => [toTimeValue(ts), overlay[idx]]),
+          lineStyle: { width: lineWidth || 2, color: overlayColor },
+          itemStyle: { color: overlayColor },
+          symbol: "none",
+          connectNulls: false,
+          ...(overlayVd.granularity !== "minute" ? { sampling: "lttb" } : {}),
+          z: 10,
+        },
+      ],
+    };
+  }
+
   function makePumpsSepOption(vd) {
     const { timestamps, pump_status, pumps, granularity } = vd;
     return {
       backgroundColor: "transparent",
-      tooltip: tooltip(),
+      tooltip: tooltip({ granularity }),
       legend: legend(pumps),
       grid: { left: 70, right: 20, top: 36, bottom: 52 },
       dataZoom: dataZoom(timestamps, granularity),
@@ -662,7 +859,7 @@
       series: pumps.map((pid, i) => ({
         name: pid, type: "bar", stack: "pumps",
         itemStyle: { color: PUMP_COLORS[i % PUMP_COLORS.length] },
-        data: pump_status[pid], barMaxWidth: 24,
+        data: pump_status[pid], barMaxWidth: granularity === "minute" ? 6 : 24,
       })),
     };
   }
@@ -670,7 +867,7 @@
   function makeSingleOption(timestamps, values, color, yLabel, granularity) {
     return {
       backgroundColor: "transparent",
-      tooltip: tooltip(),
+      tooltip: tooltip({ granularity }),
       grid: { left: 70, right: 20, top: 16, bottom: 52 },
       dataZoom: dataZoom(timestamps, granularity),
       xAxis: xAxisOpt(timestamps, granularity),
@@ -772,10 +969,20 @@
       const batch  = e.batch && e.batch[0];
       const start  = batch ? batch.start  : (e.start  ?? savedZoom?.start ?? 0);
       const end    = batch ? batch.end    : (e.end    ?? savedZoom?.end   ?? 100);
-      const wasHourly = savedZoom && visibleDays() <= ZOOM_HOURLY_THRESHOLD;
+      const baseSlice = getBaseFilteredSlice();
+      const prevZoom = savedZoom;
+      const wasResolution = getResolutionMode(baseSlice, prevZoom);
       savedZoom = { start, end };
-      const isHourly = visibleDays() <= ZOOM_HOURLY_THRESHOLD;
-      if (wasHourly !== isHourly && !sel.months.length && !sel.weeks.length) {
+      const isResolution = getResolutionMode(baseSlice, savedZoom);
+      if (wasResolution !== isResolution) {
+        if (isResolution === "minute") {
+          loadMinuteRange().then(loaded => {
+            if (!loaded.some(Boolean)) return;
+            rerendering = true;
+            renderActive();
+            rerendering = false;
+          });
+        }
         rerendering = true;
         renderActive();
         rerendering = false;
@@ -793,7 +1000,16 @@
   function renderCombined(vd, rainVd) {
     const c1 = initChart("chart-flow", "wwtp");
     const combinedRain = showRainOverlay() ? rainVd : null;
-    if (c1) { c1.setOption(makeComboOption(vd, "flow", "Flow, MGD", FLOW_COLOR, 2, combinedRain)); attachMinuteHover("chart-flow", c1, vd.timestamps, vd.granularity); attachZoomListener(c1); }
+    const flowVd = getFlowChartData();
+    if (c1) {
+      const useMixedFlow = flowVd && flowVd.granularity === "minute" && vd.granularity !== "minute";
+      c1.setOption(useMixedFlow
+        ? makeMixedComboOption(vd, flowVd, "Flow, MGD", FLOW_COLOR, 2)
+        : makeComboOption(vd, "flow", "Flow, MGD", FLOW_COLOR, 2, combinedRain)
+      );
+      attachMinuteHover("chart-flow", c1, useMixedFlow ? flowVd.timestamps : vd.timestamps, useMixedFlow ? flowVd.granularity : vd.granularity);
+      attachZoomListener(c1);
+    }
     const c2 = initChart("chart-wwl", "wwtp");
     if (c2) { c2.setOption(makeComboOption(vd, "wwl", "WWL, ft", WWL_COLOR, 2.5, combinedRain)); attachMinuteHover("chart-wwl", c2, vd.timestamps, vd.granularity); }
   }
@@ -803,8 +1019,9 @@
     if (c1) { c1.setOption(makePumpsSepOption(vd)); attachMinuteHover("chart-sep-pumps", c1, vd.timestamps, vd.granularity); }
     const c2 = initChart("chart-sep-wwl", "wwtp");
     if (c2) { c2.setOption(makeSingleOption(vd.timestamps, vd.wwl, WWL_COLOR, "WWL, ft", vd.granularity)); attachMinuteHover("chart-sep-wwl", c2, vd.timestamps, vd.granularity); }
+    const flowVd = getFlowChartData();
     const c3 = initChart("chart-sep-flow", "wwtp");
-    if (c3) { c3.setOption(makeSingleOption(vd.timestamps, vd.flow, FLOW_COLOR, "Flow, MGD", vd.granularity)); attachMinuteHover("chart-sep-flow", c3, vd.timestamps, vd.granularity); attachZoomListener(c3); }
+    if (c3 && flowVd) { c3.setOption(makeSingleOption(flowVd.timestamps, flowVd.flow, FLOW_COLOR, "Flow, MGD", flowVd.granularity)); attachMinuteHover("chart-sep-flow", c3, flowVd.timestamps, flowVd.granularity); attachZoomListener(c3); }
     renderRainChart("chart-sep-rain", rainVd);
   }
 
@@ -892,12 +1109,8 @@
       populateWeeks(months);
 
       renderActive();
-      if (months.length === 1 && sel.years.length === 1) {
-        const loaders = [loadMinuteData(sel.years[0], months[0])];
-        if (hasRain()) loaders.push(loadRainMinuteData(sel.years[0], months[0]));
-        const loaded = await Promise.all(loaders);
-        if (loaded.some(Boolean)) renderActive();
-      }
+      const loaded = await preloadSelectedDetailData();
+      if (loaded.some(Boolean)) renderActive();
     }, { showAll: true });
 
     msDay = createMultiSelect("ms-day", "All Days", days => {
@@ -959,6 +1172,7 @@
     msMonth.setSelected([defaultMonth]);
     populateWeeks([defaultMonth]);
     populateDays([defaultMonth], []);
+    await preloadSelectedDetailData();
     renderActive();
 
     document.querySelectorAll(".side-btn[data-side]").forEach(btn => {

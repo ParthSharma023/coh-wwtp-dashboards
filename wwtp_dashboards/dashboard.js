@@ -32,6 +32,8 @@
   const ZOOM_DAILY_THRESHOLD = 14;
   const ZOOM_MINUTE_THRESHOLD = 3;
   const MINUTE_MONTH_LIMIT = 3;
+  const PUMP_DAILY_THRESHOLD = 31;
+  const PUMP_MINUTE_THRESHOLD = 1;
 
   // opts: { showAll: bool, minSelected: int }
   function createMultiSelect(id, placeholder, onChange, opts) {
@@ -258,7 +260,7 @@
       if (msMonth) msMonth.clear();
       if (msDay)   msDay.clear();
       if (msWeek)  msWeek.clear();
-      populateMonths(); populateDays([]); populateWeeks([]);
+      populateMonths(); updateDayOptions([], [], false); populateWeeks([]);
       renderActive();
     } catch(e) {
       setStatus("No data for selected years");
@@ -323,6 +325,11 @@
   async function loadMinuteRange() {
     const keys = minuteKeys();
     if (!keys) return [];
+    return loadMinuteKeys(keys);
+  }
+
+  async function loadMinuteKeys(keys) {
+    if (!keys || !keys.length) return [];
     return Promise.all(keys.map(key => {
       if (minuteCache[key]) return Promise.resolve(minuteCache[key]);
       const [year, month] = key.split("_");
@@ -401,12 +408,93 @@
     return filterSourceSlice(yearData);
   }
 
+  function indexRangeFromZoom(timestamps, zoom) {
+    if (!timestamps || !timestamps.length) return { startIdx: 0, endIdx: -1 };
+    const activeZoom = zoom === undefined ? savedZoom : zoom;
+    if (!activeZoom) return { startIdx: 0, endIdx: timestamps.length - 1 };
+
+    if (activeZoom.startTs != null && activeZoom.endTs != null) {
+      const startValue = toTimeValue(activeZoom.startTs);
+      const endValue = toTimeValue(activeZoom.endTs);
+      let startIdx = 0;
+      let endIdx = timestamps.length - 1;
+
+      while (startIdx < timestamps.length && toTimeValue(timestamps[startIdx]) < startValue) startIdx += 1;
+      while (endIdx >= 0 && toTimeValue(timestamps[endIdx]) > endValue) endIdx -= 1;
+
+      if (startIdx >= timestamps.length) startIdx = timestamps.length - 1;
+      if (endIdx < 0) endIdx = 0;
+      if (endIdx < startIdx) {
+        const anchor = Math.max(0, Math.min(timestamps.length - 1, startIdx));
+        return { startIdx: anchor, endIdx: anchor };
+      }
+      return { startIdx, endIdx };
+    }
+
+    const lastIdx = timestamps.length - 1;
+    const startIdx = Math.max(0, Math.floor((activeZoom.start / 100) * lastIdx));
+    const endIdx = Math.min(lastIdx, Math.ceil((activeZoom.end / 100) * lastIdx));
+    return { startIdx, endIdx };
+  }
+
+  function zoomPercentsForTimestamps(timestamps, zoom) {
+    if (!timestamps || !timestamps.length) return { start: 0, end: 100 };
+    const activeZoom = zoom === undefined ? savedZoom : zoom;
+    if (!activeZoom) return { start: 0, end: 100 };
+    const { startIdx, endIdx } = indexRangeFromZoom(timestamps, activeZoom);
+    const lastIdx = Math.max(1, timestamps.length - 1);
+    return {
+      start: Math.max(0, Math.min(100, (startIdx / lastIdx) * 100)),
+      end: Math.max(0, Math.min(100, (endIdx / lastIdx) * 100)),
+    };
+  }
+
+  function zoomValueRangeForTimestamps(timestamps, zoom) {
+    if (!timestamps || !timestamps.length) return {};
+    const activeZoom = zoom === undefined ? savedZoom : zoom;
+    if (!activeZoom || activeZoom.startTs == null || activeZoom.endTs == null) return {};
+    return {
+      startValue: toTimeValue(activeZoom.startTs),
+      endValue: toTimeValue(activeZoom.endTs),
+    };
+  }
+
+  function timestampBoundsFromValues(timestamps, startValue, endValue) {
+    if (!timestamps || !timestamps.length) return { startTs: null, endTs: null };
+    let startIdx = 0;
+    let endIdx = timestamps.length - 1;
+    while (startIdx < timestamps.length && toTimeValue(timestamps[startIdx]) < startValue) startIdx += 1;
+    while (endIdx >= 0 && toTimeValue(timestamps[endIdx]) > endValue) endIdx -= 1;
+    if (startIdx >= timestamps.length) startIdx = timestamps.length - 1;
+    if (endIdx < 0) endIdx = 0;
+    if (endIdx < startIdx) endIdx = startIdx;
+    return {
+      startTs: timestamps[startIdx] ?? timestamps[0] ?? null,
+      endTs: timestamps[endIdx] ?? timestamps[timestamps.length - 1] ?? null,
+    };
+  }
+
   function visibleDays(slice, zoom) {
     if (!slice || !slice.timestamps || !slice.timestamps.length) return 0;
-    const totalDays = new Set(slice.timestamps.map(ts => ts.substring(0, 10))).size;
+    return new Set(visibleTimestamps(slice, zoom).map(ts => ts.substring(0, 10))).size;
+  }
+
+  function visibleTimestamps(slice, zoom) {
+    if (!slice || !slice.timestamps || !slice.timestamps.length) return [];
+    const { startIdx, endIdx } = indexRangeFromZoom(slice.timestamps, zoom);
+    return slice.timestamps.slice(startIdx, endIdx + 1);
+  }
+
+  function visibleIndexRange(target, zoom) {
+    if (Array.isArray(target)) return indexRangeFromZoom(target, zoom);
+    const length = target;
+    if (!length) return { startIdx: 0, endIdx: -1 };
     const activeZoom = zoom === undefined ? savedZoom : zoom;
-    if (!activeZoom) return totalDays;
-    return (activeZoom.end - activeZoom.start) / 100 * totalDays;
+    if (!activeZoom) return { startIdx: 0, endIdx: length - 1 };
+    const lastIdx = length - 1;
+    const startIdx = Math.max(0, Math.floor((activeZoom.start / 100) * lastIdx));
+    const endIdx = Math.min(lastIdx, Math.ceil((activeZoom.end / 100) * lastIdx));
+    return { startIdx, endIdx };
   }
 
   function getResolutionMode(baseSlice, zoom) {
@@ -415,6 +503,59 @@
     if (days >= ZOOM_MINUTE_THRESHOLD) return "hourly";
     if (minuteKeys()) return "minute";
     return "hourly";
+  }
+
+  function getLineMinuteSpec(baseSlice, zoom) {
+    const selectedKeys = minuteKeys();
+    if (selectedKeys) return { keys: selectedKeys, visibleScoped: false };
+    if (sel.years.length !== 1 || !baseSlice || !baseSlice.timestamps || !baseSlice.timestamps.length) return null;
+    if (visibleDays(baseSlice, zoom) >= ZOOM_MINUTE_THRESHOLD) return null;
+    const months = [...new Set(visibleTimestamps(baseSlice, zoom).map(ts => +ts.substring(5, 7)))].sort((a, b) => a - b);
+    if (!months.length || months.length > MINUTE_MONTH_LIMIT) return null;
+    const year = sel.years[0];
+    return {
+      keys: months.map(month => `${year}_${String(month).padStart(2, "0")}`),
+      visibleScoped: true,
+    };
+  }
+
+  function getFlowMinuteSpec(baseSlice, zoom) {
+    return getLineMinuteSpec(baseSlice, zoom);
+  }
+
+  function getWwlMinuteSpec(baseSlice, zoom) {
+    return getLineMinuteSpec(baseSlice, zoom);
+  }
+
+  function flowMinuteSpecKey(spec) {
+    if (!spec) return "";
+    return `${spec.visibleScoped ? "visible" : "selected"}:${spec.keys.join(",")}`;
+  }
+
+  function getPumpGranularity(baseSlice, zoom) {
+    const days = visibleDays(baseSlice, zoom);
+    if (days > PUMP_DAILY_THRESHOLD) return "daily";
+    if (days > PUMP_MINUTE_THRESHOLD) return "hourly";
+    return "minute";
+  }
+
+  function getPumpMinuteSpec(baseSlice, zoom) {
+    if (sel.years.length !== 1 || !baseSlice || !baseSlice.timestamps || !baseSlice.timestamps.length) return null;
+    if (getPumpGranularity(baseSlice, zoom) !== "minute") return null;
+    const selectedKeys = minuteKeys();
+    if (selectedKeys) return { keys: selectedKeys, visibleScoped: false };
+    const months = [...new Set(visibleTimestamps(baseSlice, zoom).map(ts => +ts.substring(5, 7)))].sort((a, b) => a - b);
+    if (!months.length || months.length > MINUTE_MONTH_LIMIT) return null;
+    const year = sel.years[0];
+    return {
+      keys: months.map(month => `${year}_${String(month).padStart(2, "0")}`),
+      visibleScoped: true,
+    };
+  }
+
+  function pumpMinuteSpecKey(spec) {
+    if (!spec) return "";
+    return `${spec.visibleScoped ? "visible" : "selected"}:${spec.keys.join(",")}`;
   }
 
   function getFilteredSlice() {
@@ -431,10 +572,23 @@
   }
 
   function getFlowChartData() {
-    const keys = minuteKeys();
-    if (keys) {
+    const baseSlice = getBaseFilteredSlice();
+    const spec = getFlowMinuteSpec(baseSlice, savedZoom);
+    if (spec) {
+      const keys = spec.keys;
       const minuteData = mergeMinuteData(keys);
-      if (minuteData) return filterSourceSlice({ ...minuteData, granularity: "minute" });
+      if (minuteData) return { ...filterSourceSlice({ ...minuteData, granularity: "minute" }), visibleScoped: spec.visibleScoped };
+    }
+    return getFilteredSlice();
+  }
+
+  function getWwlChartData() {
+    const baseSlice = getBaseFilteredSlice();
+    const spec = getWwlMinuteSpec(baseSlice, savedZoom);
+    if (spec) {
+      const keys = spec.keys;
+      const minuteData = mergeMinuteData(keys);
+      if (minuteData) return { ...filterSourceSlice({ ...minuteData, granularity: "minute" }), visibleScoped: spec.visibleScoped };
     }
     return getFilteredSlice();
   }
@@ -462,6 +616,70 @@
       daily.wwl_west = daily.timestamps.map(d => maxVal2(B[d] ? B[d].west : []));
     }
     return filterActivePumps(daily);
+  }
+
+  function aggregatePumpBuckets(timestamps, pump_status, pumps, bucketFn, granularity) {
+    const buckets = {};
+    timestamps.forEach((ts, i) => {
+      const key = bucketFn(ts);
+      if (!buckets[key]) buckets[key] = {};
+      pumps.forEach(p => {
+        if (!buckets[key][p]) buckets[key][p] = [];
+        if (pump_status[p][i] != null) buckets[key][p].push(pump_status[p][i]);
+      });
+    });
+    const keys = Object.keys(buckets).sort();
+    return {
+      timestamps: keys,
+      pumps,
+      pump_status: Object.fromEntries(
+        pumps.map(p => [p, keys.map(key => maxVal(buckets[key][p] || []))])
+      ),
+      granularity,
+    };
+  }
+
+  function getPumpChartData() {
+    const baseSlice = getBaseFilteredSlice();
+    if (!baseSlice) return null;
+
+    const granularity = getPumpGranularity(baseSlice, savedZoom);
+    if (granularity === "daily") {
+      return filterActivePumps(aggregatePumpBuckets(
+        baseSlice.timestamps,
+        baseSlice.pump_status,
+        baseSlice.pumps,
+        ts => ts.substring(0, 10),
+        "daily"
+      ));
+    }
+
+    if (granularity === "hourly") {
+      return filterActivePumps({
+        timestamps: baseSlice.timestamps,
+        pump_status: baseSlice.pump_status,
+        pumps: baseSlice.pumps,
+        granularity: "hourly",
+      });
+    }
+
+    const spec = getPumpMinuteSpec(baseSlice, savedZoom);
+    if (spec) {
+      const minuteData = mergeMinuteData(spec.keys);
+      if (minuteData) {
+        return filterActivePumps({
+          ...filterSourceSlice({ ...minuteData, granularity: "minute" }),
+          visibleScoped: spec.visibleScoped,
+        });
+      }
+    }
+
+    return filterActivePumps({
+      timestamps: baseSlice.timestamps,
+      pump_status: baseSlice.pump_status,
+      pumps: baseSlice.pumps,
+      granularity: "hourly",
+    });
   }
 
   function getRainViewData() {
@@ -600,13 +818,21 @@
     };
   }
 
-  function dataZoom(timestamps, granularity) {
-    const start = savedZoom ? savedZoom.start : 0;
-    const end   = savedZoom ? savedZoom.end   : 100;
+  function dataZoom(timestamps, granularity, useTimeValues) {
+    const { start, end } = zoomPercentsForTimestamps(timestamps, savedZoom);
+    const valueRange = useTimeValues ? zoomValueRangeForTimestamps(timestamps, savedZoom) : {};
     return [
-      { type: "inside", xAxisIndex: 0, start, end },
       {
-        type: "slider", xAxisIndex: 0, height: 18, bottom: 4, start, end,
+        type: "inside",
+        xAxisIndex: 0,
+        ...(valueRange.startValue != null ? valueRange : { start, end }),
+      },
+      {
+        type: "slider",
+        xAxisIndex: 0,
+        height: 18,
+        bottom: 4,
+        ...(valueRange.startValue != null ? valueRange : { start, end }),
         fillerColor: "rgba(93,168,255,0.12)", borderColor: TIP_BORDER,
         textStyle: { color: "#b4c0d0", fontSize: 10 },
       },
@@ -687,20 +913,12 @@
       textStyle: { color: "#eff5fb", fontSize: 12 },
       axisPointer: { type: "shadow" },
       formatter: params => {
-        const canUseMinuteHover = params.some(p =>
-          p.seriesName === "Flow, MGD" || p.seriesName === "WWL, ft"
-        );
-        const hm = canUseMinuteHover && granularity !== "minute" ? hoveredMinuteTs : null;
         const axisTs = params[0].axisValue;
-        const ts = (hm && hm.ts) || axisTs;
+        const ts = fmtAxisValue(axisTs, granularity || "hourly");
         let out = '<div style="margin-bottom:4px;font-weight:600">' + ts + '</div>';
         params.forEach(p => {
           if (p.value == null || p.value === "-") return;
-          let raw = p.value;
-          if (hm) {
-            if (p.seriesName === "Flow, MGD" && hm.flow != null) raw = hm.flow;
-            else if (p.seriesName === "WWL, ft" && hm.wwl != null) raw = hm.wwl;
-          }
+          const raw = p.value;
           const v = typeof raw === "number"
             ? (Number.isInteger(raw) ? raw : +raw.toFixed(2))
             : raw;
@@ -708,7 +926,7 @@
         });
         if (rainLookup && !params.some(p => p.seriesName === rainSeriesName)) {
           let rainTs = axisTs;
-          if (rainGranularity === "5min") rainTs = floorToFiveMinute(ts);
+          if (rainGranularity === "5min" && typeof axisTs === "string") rainTs = floorToFiveMinute(axisTs);
           const rainVal = rainLookup[rainTs];
           if (rainVal != null) {
             const label = rainGranularity === "5min" ? "Rain (5-min)" : rainGranularity === "daily" ? "Rain (daily)" : "Rain";
@@ -771,15 +989,72 @@
           lineStyle: { width: lineWidth || 2, color: overlayColor },
           itemStyle: { color: overlayColor },
           symbol: "none", connectNulls: false, z: 10,
+          markPoint: getFlowExtremaMarkPoint(timestamps, overlay, granularity),
         },
       ],
     };
   }
 
-  function makeMixedComboOption(vd, overlayVd, overlayName, overlayColor, lineWidth) {
+  function getFlowExtremaMarkPoint(timestamps, values, granularity) {
+    if (!timestamps || !values || !timestamps.length || !values.length) return null;
+    const visibleSpan = visibleDays({ timestamps }, savedZoom);
+    if (visibleSpan > 60) return null;
+
+    const { startIdx, endIdx } = visibleIndexRange(timestamps, savedZoom);
+    const points = [];
+    for (let i = startIdx; i <= endIdx; i += 1) {
+      const value = values[i];
+      if (value == null) continue;
+      points.push({ index: i, ts: timestamps[i], value });
+    }
+    if (!points.length) return null;
+
+    const labelCount = visibleSpan > 14 ? 2 : visibleSpan > 3 ? 4 : 6;
+    const spacing = Math.max(4, Math.floor((endIdx - startIdx + 1) / Math.max(3, labelCount)));
+    const picked = [];
+    const used = new Set();
+
+    function addCandidates(sorted, type) {
+      for (const point of sorted) {
+        if (picked.length >= labelCount) break;
+        const tooClose = picked.some(existing => Math.abs(existing.index - point.index) < spacing);
+        if (tooClose || used.has(point.index)) continue;
+        used.add(point.index);
+        picked.push({ ...point, type });
+      }
+    }
+
+    addCandidates(points.slice().sort((a, b) => b.value - a.value), "max");
+    addCandidates(points.slice().sort((a, b) => a.value - b.value), "min");
+
+    if (!picked.length) return null;
+
+    return {
+      symbol: "pin",
+      symbolSize: 24,
+      itemStyle: { color: "rgba(241,245,251,0.18)", borderColor: "rgba(241,245,251,0.45)" },
+      label: {
+        color: "#eff5fb",
+        fontSize: 10,
+        formatter: ({ value }) => {
+          const raw = Array.isArray(value) ? value[1] : value;
+          return raw == null ? "" : (+raw).toFixed(2);
+        },
+      },
+      data: picked
+        .sort((a, b) => a.index - b.index)
+        .map(point => ({
+          coord: [point.ts, point.value],
+          value: point.value,
+          name: point.type,
+        })),
+    };
+  }
+
+  function makeMixedComboOption(vd, overlayVd, overlayKey, overlayName, overlayColor, lineWidth) {
     const { timestamps, pump_status, pumps, granularity } = vd;
     const overlayTs = overlayVd.timestamps;
-    const overlay = overlayVd.flow;
+    const overlay = overlayVd[overlayKey];
     const renderMinutePumps = !!(
       overlayVd.granularity === "minute" &&
       overlayVd.pump_status &&
@@ -816,7 +1091,7 @@
       },
       legend: legend([...pumps, overlayName]),
       grid: { left: 70, right: 70, top: 44, bottom: 52 },
-      dataZoom: dataZoom(overlayTs, overlayVd.granularity),
+      dataZoom: dataZoom(overlayTs, overlayVd.granularity, true),
       xAxis: timeXAxisOpt(overlayVd.granularity),
       yAxis: [yAxisLeft("Pump Status (0/1)"), yAxisRight(overlayName)],
       series: [
@@ -841,6 +1116,7 @@
           connectNulls: false,
           ...(overlayVd.granularity !== "minute" ? { sampling: "lttb" } : {}),
           z: 10,
+          markPoint: getFlowExtremaMarkPoint(overlayTs, overlay, overlayVd.granularity),
         },
       ],
     };
@@ -874,6 +1150,9 @@
       yAxis: { ...yAxisLeft(yLabel), min: undefined },
       series: [{
         type: "bar", data: values, itemStyle: { color }, barMaxWidth: 24,
+        markPoint: (yLabel === "Flow, MGD" || yLabel === "WWL, ft")
+          ? getFlowExtremaMarkPoint(timestamps, values, granularity)
+          : null,
       }],
     };
   }
@@ -935,18 +1214,31 @@
     };
   }
 
-  function renderStatisticsPanel(slice) {
+  function renderStatisticsPanel(slice, flowSlice, wwlSlice) {
     const fmt = v => v == null ? "—" : v.toFixed(2);
     const set = (id, v) => { const el = document.getElementById(id); if (el) el.textContent = fmt(v); };
     const daily  = ts => ts.substring(0, 10);
     const weekly = ts => isoWeekInfo(ts).key;
-    const wwlValues = selectedSide && slice["wwl_" + selectedSide] ? slice["wwl_" + selectedSide] : slice.wwl;
-    for (const [sig, values] of [["flow", slice.flow], ["wwl", wwlValues]]) {
-      const d = summarizeGroupedStats(slice.timestamps, values, daily);
-      const w = summarizeGroupedStats(slice.timestamps, values, weekly);
-      set(`stat-${sig}-d-min`,  d.min);  set(`stat-${sig}-d-mean`, d.mean);  set(`stat-${sig}-d-max`, d.max);
-      set(`stat-${sig}-w-min`,  w.min);  set(`stat-${sig}-w-mean`, w.mean);  set(`stat-${sig}-w-max`, w.max);
-    }
+    const flowSource = flowSlice || slice;
+    const wwlSource = wwlSlice || slice;
+    const wwlValues = selectedSide && wwlSource["wwl_" + selectedSide] ? wwlSource["wwl_" + selectedSide] : wwlSource.wwl;
+    const flowDaily = summarizeGroupedStats(flowSource.timestamps, flowSource.flow, daily);
+    const flowWeekly = summarizeGroupedStats(flowSource.timestamps, flowSource.flow, weekly);
+    set("stat-flow-d-min", flowDaily.min);
+    set("stat-flow-d-mean", flowDaily.mean);
+    set("stat-flow-d-max", flowDaily.max);
+    set("stat-flow-w-min", flowWeekly.min);
+    set("stat-flow-w-mean", flowWeekly.mean);
+    set("stat-flow-w-max", flowWeekly.max);
+
+    const wwlDaily = summarizeGroupedStats(wwlSource.timestamps, wwlValues, daily);
+    const wwlWeekly = summarizeGroupedStats(wwlSource.timestamps, wwlValues, weekly);
+    set("stat-wwl-d-min", wwlDaily.min);
+    set("stat-wwl-d-mean", wwlDaily.mean);
+    set("stat-wwl-d-max", wwlDaily.max);
+    set("stat-wwl-w-min", wwlWeekly.min);
+    set("stat-wwl-w-mean", wwlWeekly.mean);
+    set("stat-wwl-w-max", wwlWeekly.max);
   }
 
   // ── Render ────────────────────────────────────────────────────────────────
@@ -962,27 +1254,68 @@
     return charts[id];
   }
 
-  function attachZoomListener(chart) {
+  function attachZoomListener(chart, timestamps, useTimeValues) {
     if (!chart) return;
     chart.on("dataZoom", e => {
       if (rerendering) return;
       const batch  = e.batch && e.batch[0];
       const start  = batch ? batch.start  : (e.start  ?? savedZoom?.start ?? 0);
       const end    = batch ? batch.end    : (e.end    ?? savedZoom?.end   ?? 100);
+      const activeTimestamps = timestamps || [];
+      const startValue = batch ? batch.startValue : e.startValue;
+      const endValue = batch ? batch.endValue : e.endValue;
+      let startTs;
+      let endTs;
+      if (useTimeValues && startValue != null && endValue != null && activeTimestamps.length) {
+        ({ startTs, endTs } = timestampBoundsFromValues(activeTimestamps, startValue, endValue));
+      } else {
+        const { startIdx, endIdx } = visibleIndexRange(activeTimestamps, { start, end });
+        startTs = activeTimestamps[startIdx] ?? activeTimestamps[0] ?? null;
+        endTs = activeTimestamps[endIdx] ?? activeTimestamps[activeTimestamps.length - 1] ?? null;
+      }
+      if (
+        savedZoom &&
+        savedZoom.start === start &&
+        savedZoom.end === end &&
+        savedZoom.startTs === startTs &&
+        savedZoom.endTs === endTs
+      ) return;
       const baseSlice = getBaseFilteredSlice();
       const prevZoom = savedZoom;
       const wasResolution = getResolutionMode(baseSlice, prevZoom);
-      savedZoom = { start, end };
+      const wasFlowSpec = getFlowMinuteSpec(baseSlice, prevZoom);
+      const wasWwlSpec = getWwlMinuteSpec(baseSlice, prevZoom);
+      const wasPumpSpec = getPumpMinuteSpec(baseSlice, prevZoom);
+      const wasPumpGranularity = getPumpGranularity(baseSlice, prevZoom);
+      savedZoom = { start, end, startTs, endTs };
       const isResolution = getResolutionMode(baseSlice, savedZoom);
-      if (wasResolution !== isResolution) {
-        if (isResolution === "minute") {
-          loadMinuteRange().then(loaded => {
+      const isFlowSpec = getFlowMinuteSpec(baseSlice, savedZoom);
+      const isWwlSpec = getWwlMinuteSpec(baseSlice, savedZoom);
+      const isPumpSpec = getPumpMinuteSpec(baseSlice, savedZoom);
+      const isPumpGranularity = getPumpGranularity(baseSlice, savedZoom);
+      const flowChanged = flowMinuteSpecKey(wasFlowSpec) !== flowMinuteSpecKey(isFlowSpec);
+      const wwlChanged = flowMinuteSpecKey(wasWwlSpec) !== flowMinuteSpecKey(isWwlSpec);
+      const pumpChanged = pumpMinuteSpecKey(wasPumpSpec) !== pumpMinuteSpecKey(isPumpSpec)
+        || wasPumpGranularity !== isPumpGranularity;
+
+      if (wasResolution !== isResolution || flowChanged || wwlChanged || pumpChanged) {
+        const keysToLoad = new Set();
+        const selectedKeys = minuteKeys();
+        if (isResolution === "minute" && selectedKeys) selectedKeys.forEach(key => keysToLoad.add(key));
+        if (isFlowSpec) isFlowSpec.keys.forEach(key => keysToLoad.add(key));
+        if (isWwlSpec) isWwlSpec.keys.forEach(key => keysToLoad.add(key));
+        if (isPumpSpec) isPumpSpec.keys.forEach(key => keysToLoad.add(key));
+
+        if (keysToLoad.size) {
+          loadMinuteKeys([...keysToLoad]).then(loaded => {
             if (!loaded.some(Boolean)) return;
             rerendering = true;
             renderActive();
             rerendering = false;
           });
+          return;
         }
+
         rerendering = true;
         renderActive();
         rerendering = false;
@@ -1001,27 +1334,30 @@
     const c1 = initChart("chart-flow", "wwtp");
     const combinedRain = showRainOverlay() ? rainVd : null;
     const flowVd = getFlowChartData();
+    const pumpVd = applySideFilter(getPumpChartData());
     if (c1) {
-      const useMixedFlow = flowVd && flowVd.granularity === "minute" && vd.granularity !== "minute";
-      c1.setOption(useMixedFlow
-        ? makeMixedComboOption(vd, flowVd, "Flow, MGD", FLOW_COLOR, 2)
-        : makeComboOption(vd, "flow", "Flow, MGD", FLOW_COLOR, 2, combinedRain)
-      );
-      attachMinuteHover("chart-flow", c1, useMixedFlow ? flowVd.timestamps : vd.timestamps, useMixedFlow ? flowVd.granularity : vd.granularity);
-      attachZoomListener(c1);
+      c1.setOption(makeMixedComboOption(pumpVd || vd, flowVd || vd, "flow", "Flow, MGD", FLOW_COLOR, 2));
+      attachMinuteHover("chart-flow", c1, flowVd ? flowVd.timestamps : vd.timestamps, flowVd ? flowVd.granularity : vd.granularity);
+      attachZoomListener(c1, flowVd ? flowVd.timestamps : vd.timestamps);
     }
+    const wwlVd = applySideFilter(getWwlChartData());
     const c2 = initChart("chart-wwl", "wwtp");
-    if (c2) { c2.setOption(makeComboOption(vd, "wwl", "WWL, ft", WWL_COLOR, 2.5, combinedRain)); attachMinuteHover("chart-wwl", c2, vd.timestamps, vd.granularity); }
+    if (c2) {
+      c2.setOption(makeMixedComboOption(pumpVd || vd, wwlVd || vd, "wwl", "WWL, ft", WWL_COLOR, 2.5));
+      attachMinuteHover("chart-wwl", c2, wwlVd ? wwlVd.timestamps : vd.timestamps, wwlVd ? wwlVd.granularity : vd.granularity);
+    }
   }
 
   function renderSeparate(vd, rainVd) {
     const c1 = initChart("chart-sep-pumps", "wwtp");
-    if (c1) { c1.setOption(makePumpsSepOption(vd)); attachMinuteHover("chart-sep-pumps", c1, vd.timestamps, vd.granularity); }
+    const pumpVd = applySideFilter(getPumpChartData());
+    if (c1 && pumpVd) { c1.setOption(makePumpsSepOption(pumpVd)); attachMinuteHover("chart-sep-pumps", c1, pumpVd.timestamps, pumpVd.granularity); }
     const c2 = initChart("chart-sep-wwl", "wwtp");
-    if (c2) { c2.setOption(makeSingleOption(vd.timestamps, vd.wwl, WWL_COLOR, "WWL, ft", vd.granularity)); attachMinuteHover("chart-sep-wwl", c2, vd.timestamps, vd.granularity); }
+    const wwlVd = applySideFilter(getWwlChartData());
+    if (c2 && wwlVd) { c2.setOption(makeSingleOption(wwlVd.timestamps, wwlVd.wwl, WWL_COLOR, "WWL, ft", wwlVd.granularity)); attachMinuteHover("chart-sep-wwl", c2, wwlVd.timestamps, wwlVd.granularity); }
     const flowVd = getFlowChartData();
     const c3 = initChart("chart-sep-flow", "wwtp");
-    if (c3 && flowVd) { c3.setOption(makeSingleOption(flowVd.timestamps, flowVd.flow, FLOW_COLOR, "Flow, MGD", flowVd.granularity)); attachMinuteHover("chart-sep-flow", c3, flowVd.timestamps, flowVd.granularity); attachZoomListener(c3); }
+    if (c3 && flowVd) { c3.setOption(makeSingleOption(flowVd.timestamps, flowVd.flow, FLOW_COLOR, "Flow, MGD", flowVd.granularity)); attachMinuteHover("chart-sep-flow", c3, flowVd.timestamps, flowVd.granularity); attachZoomListener(c3, flowVd.timestamps); }
     renderRainChart("chart-sep-rain", rainVd);
   }
 
@@ -1029,7 +1365,9 @@
   function renderActive() {
     const slice = getFilteredSlice();
     if (!slice) return;
-    renderStatisticsPanel(slice);
+    const flowSlice = getFlowChartData();
+    const wwlSlice = getWwlChartData();
+    renderStatisticsPanel(slice, flowSlice, wwlSlice);
     const vd = applySideFilter(getViewData());
     if (!vd) return;
     const rainVd = getRainViewData();
@@ -1048,13 +1386,16 @@
     msMonth.setOptions(months.map(m => ({ value: m, label: MO[m-1] })));
   }
 
-  function populateDays(months, weeks) {
+  function updateDayOptions(months, weeks, preserveSelection) {
     if (!msDay || !yearData) return;
     let src = yearData.timestamps;
     if (months && months.length) src = src.filter(ts => months.includes(+ts.substring(5,7)));
     if (weeks  && weeks.length)  src = src.filter(ts => weeks.includes(isoWeek(ts)));
     const days = [...new Set(src.map(ts => +ts.substring(8,10)))].sort((a,b)=>a-b);
+    const validDays = preserveSelection ? sel.days.filter(d => days.includes(d)) : [];
+    sel.days = validDays;
     msDay.setOptions(days.map(d => ({ value: d, label: String(d) })));
+    if (validDays.length) msDay.setSelected(validDays);
   }
 
   function populateWeeks(months) {
@@ -1097,6 +1438,7 @@
       sel.years = years;
       minuteCache = {};
       rainMinuteCache = {};
+      savedZoom = null;
 
       await loadYears(years.length ? years : meta.years);
     }, { showAll: true });
@@ -1104,8 +1446,9 @@
     msMonth = createMultiSelect("ms-month", "All Months", async months => {
       sel.months = months;
       sel.days = []; sel.weeks = [];
+      savedZoom = null;
       msDay.clear(); msWeek.clear();
-      populateDays(months, []);
+      updateDayOptions(months, [], false);
       populateWeeks(months);
 
       renderActive();
@@ -1115,6 +1458,7 @@
 
     msDay = createMultiSelect("ms-day", "All Days", days => {
       sel.days = days;
+      savedZoom = null;
 
       renderActive();
     }, { showAll: true });
@@ -1122,14 +1466,16 @@
     msWeek = createMultiSelect("ms-week", "All Weeks", weeks => {
       sel.weeks = weeks;
       sel.days = [];
+      savedZoom = null;
       msDay.clear();
-      populateDays(sel.months, weeks);
+      updateDayOptions(sel.months, weeks, false);
       renderActive();
     }, { showAll: true });
 
     if (hasRain()) {
       msGauge = createMultiSelect("ms-gauge", "Gauge", async gauges => {
         sel.gauges = gauges;
+        savedZoom = null;
         updateRainToggleUI();
         renderActive();
         if (gauges.length && sel.months.length === 1 && sel.years.length === 1) {
@@ -1152,6 +1498,7 @@
       rainToggleBtn.addEventListener("click", () => {
         if (!rainEnabled()) return;
         sel.includeRain = !sel.includeRain;
+        savedZoom = null;
         updateRainToggleUI();
         renderActive();
       });
@@ -1171,7 +1518,7 @@
     sel.months = [defaultMonth];
     msMonth.setSelected([defaultMonth]);
     populateWeeks([defaultMonth]);
-    populateDays([defaultMonth], []);
+    updateDayOptions([defaultMonth], [], false);
     await preloadSelectedDetailData();
     renderActive();
 
@@ -1180,14 +1527,16 @@
         document.querySelectorAll(".side-btn").forEach(b => b.classList.remove("active"));
         btn.classList.add("active");
         selectedSide = btn.dataset.side;
+        savedZoom = null;
         renderActive();
       });
     });
 
     document.getElementById("btn-reset").addEventListener("click", () => {
       sel.months = []; sel.days = []; sel.weeks = [];
+      savedZoom = null;
       msMonth.clear(); msDay.clear(); msWeek.clear();
-      populateDays([]);
+      updateDayOptions([], [], false);
 
       renderActive();
     });

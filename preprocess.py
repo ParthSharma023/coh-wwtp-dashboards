@@ -99,6 +99,17 @@ def safe(v):
         return None
 
 
+def safe_count(v):
+    if v is None:
+        return None
+    try:
+        if pd.isna(v):
+            return None
+    except Exception:
+        pass
+    return int(v)
+
+
 def extract_pump_id(tagname, fid):
     parts = tagname.split(fid, 1)
     if len(parts) < 2:
@@ -133,6 +144,24 @@ def read_parquet_sides(fid, kind):
         df["Timestamp"] = pd.to_datetime(df["Timestamp"], utc=False).dt.tz_localize(None)
         return df
     return load("_east"), load("_west")
+
+
+def resample_stats(df, value_col, freq):
+    series = df.set_index("Timestamp")[value_col]
+    grouped = series.resample(freq)
+    return {
+        "mean": grouped.mean(),
+        "min": grouped.min(),
+        "max": grouped.max(),
+        "count": grouped.count(),
+    }
+
+
+def write_data_files(path_base, out, js_expr):
+    with open(path_base.with_suffix(".json"), "w") as f:
+        json.dump(out, f, separators=(",", ":"))
+    with open(path_base.with_suffix(".js"), "w") as f:
+        f.write(js_expr)
 
 
 def process_plant(fid, plant_name, slug, pump_file_fid=None, pump_tag_fid=None, wwl_file_fid=None, secondary_fid=None):
@@ -175,11 +204,11 @@ def process_plant(fid, plant_name, slug, pump_file_fid=None, pump_tag_fid=None, 
     )
 
     # ── Hourly series ─────────────────────────────────────────────────────────
-    flow_h = df_flow.set_index("Timestamp")["Flow_MGD"].resample("1h").mean()
-    wwl_h  = df_wwl.set_index("Timestamp")["WWL_ft"].resample("1h").mean()
+    flow_h = resample_stats(df_flow, "Flow_MGD", "1h")
+    wwl_h  = resample_stats(df_wwl, "WWL_ft", "1h")
     if ew:
-        wwl_east_h = df_wwl_east.set_index("Timestamp")["WWL_ft"].resample("1h").mean()
-        wwl_west_h = df_wwl_west.set_index("Timestamp")["WWL_ft"].resample("1h").mean()
+        wwl_east_h = resample_stats(df_wwl_east, "WWL_ft", "1h")
+        wwl_west_h = resample_stats(df_wwl_west, "WWL_ft", "1h")
 
     pump_pivot   = df_pumps.pivot_table(
         index="Timestamp", columns="PumpID", values="Pumps_status", aggfunc="sum"
@@ -189,8 +218,8 @@ def process_plant(fid, plant_name, slug, pump_file_fid=None, pump_tag_fid=None, 
     print(f"  Pump IDs: {pump_ids}")
 
     all_years = sorted(set(
-        flow_h.index.year.tolist()
-        + wwl_h.index.year.tolist()
+        flow_h["mean"].index.year.tolist()
+        + wwl_h["mean"].index.year.tolist()
         + pump_pivot_h.index.year.tolist()
     ))
     print(f"  Years: {all_years}")
@@ -198,9 +227,9 @@ def process_plant(fid, plant_name, slug, pump_file_fid=None, pump_tag_fid=None, 
     # ── Per-year JS ───────────────────────────────────────────────────────────
     print("  Writing yearly files…")
     for year in all_years:
-        idx    = pd.date_range(f"{year}-01-01", f"{year}-12-31 23:00", freq="1h")
-        flow_y = flow_h.reindex(idx)
-        wwl_y  = wwl_h.reindex(idx)
+        idx = pd.date_range(f"{year}-01-01", f"{year}-12-31 23:00", freq="1h")
+        flow_y = {name: values.reindex(idx) for name, values in flow_h.items()}
+        wwl_y = {name: values.reindex(idx) for name, values in wwl_h.items()}
         pump_y = pump_pivot_h.reindex(idx)
 
         pump_data = {}
@@ -212,17 +241,34 @@ def process_plant(fid, plant_name, slug, pump_file_fid=None, pump_tag_fid=None, 
             "plant": plant_name, "fid": fid, "year": year,
             "pumps": pump_ids,
             "timestamps": [ts.strftime("%Y-%m-%d %H:%M") for ts in idx],
-            "flow": [safe(v) for v in flow_y.values],
-            "wwl":  [safe(v) for v in wwl_y.values],
+            "flow_mean": [safe(v) for v in flow_y["mean"].values],
+            "flow_min": [safe(v) for v in flow_y["min"].values],
+            "flow_max": [safe(v) for v in flow_y["max"].values],
+            "flow_count": [safe_count(v) for v in flow_y["count"].values],
+            "wwl_mean": [safe(v) for v in wwl_y["mean"].values],
+            "wwl_min": [safe(v) for v in wwl_y["min"].values],
+            "wwl_max": [safe(v) for v in wwl_y["max"].values],
+            "wwl_count": [safe_count(v) for v in wwl_y["count"].values],
             "pump_status": pump_data,
         }
         if ew:
-            out["wwl_east"] = [safe(v) for v in wwl_east_h.reindex(idx).values]
-            out["wwl_west"] = [safe(v) for v in wwl_west_h.reindex(idx).values]
-        p = out_dir / f"{year}.js"
-        with open(p, "w") as f:
-            f.write(f"window.__wwtp_year=window.__wwtp_year||{{}};window.__wwtp_year[{year}]={json.dumps(out, separators=(',', ':'))};")
-        print(f"    {year}: {p.stat().st_size//1024} KB")
+            east_y = {name: values.reindex(idx) for name, values in wwl_east_h.items()}
+            west_y = {name: values.reindex(idx) for name, values in wwl_west_h.items()}
+            out["wwl_east_mean"] = [safe(v) for v in east_y["mean"].values]
+            out["wwl_east_min"] = [safe(v) for v in east_y["min"].values]
+            out["wwl_east_max"] = [safe(v) for v in east_y["max"].values]
+            out["wwl_east_count"] = [safe_count(v) for v in east_y["count"].values]
+            out["wwl_west_mean"] = [safe(v) for v in west_y["mean"].values]
+            out["wwl_west_min"] = [safe(v) for v in west_y["min"].values]
+            out["wwl_west_max"] = [safe(v) for v in west_y["max"].values]
+            out["wwl_west_count"] = [safe_count(v) for v in west_y["count"].values]
+        path_base = out_dir / str(year)
+        write_data_files(
+            path_base,
+            out,
+            f"window.__wwtp_year=window.__wwtp_year||{{}};window.__wwtp_year[{year}]={json.dumps(out, separators=(',', ':'))};",
+        )
+        print(f"    {year}: {path_base.with_suffix('.js').stat().st_size//1024} KB")
 
     # ── Minute-level series ───────────────────────────────────────────────────
     flow_min = df_flow.set_index("Timestamp")["Flow_MGD"].resample("1min").mean()
@@ -266,9 +312,12 @@ def process_plant(fid, plant_name, slug, pump_file_fid=None, pump_tag_fid=None, 
             out["wwl_east"] = [safe(v) for v in wwl_east_min.reindex(idx).values]
             out["wwl_west"] = [safe(v) for v in wwl_west_min.reindex(idx).values]
         key = f"{year}_{month:02d}"
-        p = out_dir / f"{key}_min.js"
-        with open(p, "w") as f:
-            f.write(f"window.__wwtp_min=window.__wwtp_min||{{}};window.__wwtp_min[\"{key}\"]={json.dumps(out, separators=(',', ':'))};")
+        path_base = out_dir / f"{key}_min"
+        write_data_files(
+            path_base,
+            out,
+            f"window.__wwtp_min=window.__wwtp_min||{{}};window.__wwtp_min[\"{key}\"]={json.dumps(out, separators=(',', ':'))};",
+        )
 
     print(f"  Monthly files: {len(months_present)}")
 
@@ -575,13 +624,16 @@ def make_landing_page(plant_infos):
 # ── Main ──────────────────────────────────────────────────────────────────────
 parser = argparse.ArgumentParser()
 parser.add_argument("--fid", help="Process only this FID")
+parser.add_argument("--rewrite-html", action="store_true", help="Rewrite plant index.html shells")
 args = parser.parse_args()
 
 plants_to_run = [p for p in PLANTS if not args.fid or p[0] == args.fid]
 
 results = []
 for fid, name, slug, pump_file_fid, pump_tag_fid, wwl_file_fid, secondary_fid in plants_to_run:
-    make_plant_html(fid, name, slug)
+    plant_index = OUTPUT_BASE / slug / "index.html"
+    if args.rewrite_html or not plant_index.exists():
+        make_plant_html(fid, name, slug)
     try:
         info = process_plant(fid, name, slug, pump_file_fid=pump_file_fid, pump_tag_fid=pump_tag_fid, wwl_file_fid=wwl_file_fid, secondary_fid=secondary_fid)
         results.append(info)

@@ -23,10 +23,19 @@ OUTPUT_BASE = Path("wwtp_dashboards")
 
 # FID → (slug, display_name)
 PLANT_SLUGS = {
-    "0146": ("northeast",    "Northeast WWTP"),
-    "0400": ("69th_street",  "69th Street WWTP"),
-    "0469": ("willowbrook",  "Willowbrook WWTP"),
-    # add more as we expand rain coverage
+    "0146": ("northeast",       "Northeast WWTP"),
+    "0400": ("69th_street",     "69th Street WWTP"),
+    "0469": ("willowbrook",     "Willowbrook WWTP"),
+    "0006": ("almeda_sims",     "Almeda Sims WWTP"),
+    "0242": ("beltway",         "Beltway WWTP"),
+    "0244": ("cedar_bayou",     "Cedar Bayou WWTP"),
+    "0039": ("chocolate_bayou", "Chocolate Bayou WWTP"),
+    "0040": ("clinton_park",    "Clinton Park WWTP"),
+    "0059": ("easthaven",       "Easthaven WWTP"),
+    "0107": ("homestead",       "Homestead WWTP"),
+    "0250": ("keegans_bayou",   "Keegan's Bayou WWTP"),
+    "0145": ("northwest",       "Northwest WWTP"),
+    "0171": ("sagemont",        "Sagemont WWTP"),
 }
 
 def safe(v):
@@ -54,7 +63,7 @@ def get_plant_year_range(slug):
         return None, None
 
 
-def process_rain(fid, gauge_id, start_year=None, end_year=None):
+def process_rain(fid, gauge_id, start_year=None, end_year=None, multi=False):
     if fid not in PLANT_SLUGS:
         print(f"ERROR: FID {fid} not in PLANT_SLUGS — add it first.")
         sys.exit(1)
@@ -133,9 +142,14 @@ def process_rain(fid, gauge_id, start_year=None, end_year=None):
             "timestamps": [ts.strftime("%Y-%m-%d %H:%M") for ts in idx],
             "rain": [safe(v) for v in rain_y.values],
         }
-        p = out_dir / f"rain_{year}.js"
+        if multi:
+            ns = f"__wwtp_rain_g{gauge_id}"
+            p  = out_dir / f"rain_g{gauge_id}_{year}.js"
+        else:
+            ns = "__wwtp_rain"
+            p  = out_dir / f"rain_{year}.js"
         with open(p, "w") as f:
-            f.write(f"window.__wwtp_rain=window.__wwtp_rain||{{}};window.__wwtp_rain[{year}]={json.dumps(out, separators=(',', ':'))};")
+            f.write(f"window.{ns}=window.{ns}||{{}};window.{ns}[{year}]={json.dumps(out, separators=(',', ':'))};")
         print(f"    {year}: {p.stat().st_size//1024} KB")
 
     # ── 5-min monthly files ───────────────────────────────────────────────────
@@ -160,18 +174,24 @@ def process_rain(fid, gauge_id, start_year=None, end_year=None):
             "rain": [safe(v) for v in rain_m.values],
         }
         key = f"{year}_{month:02d}"
-        p = out_dir / f"rain_{key}_min.js"
+        if multi:
+            ns_min = f"__wwtp_rain_g{gauge_id}_min"
+            p = out_dir / f"rain_g{gauge_id}_{key}_min.js"
+        else:
+            ns_min = "__wwtp_rain_min"
+            p = out_dir / f"rain_{key}_min.js"
         with open(p, "w") as f:
-            f.write(f"window.__wwtp_rain_min=window.__wwtp_rain_min||{{}};window.__wwtp_rain_min[\"{key}\"]={json.dumps(out, separators=(',', ':'))};")
+            f.write(f"window.{ns_min}=window.{ns_min}||{{}};window.{ns_min}[\"{key}\"]={json.dumps(out, separators=(',', ':'))};")
 
     print("  Done.")
 
 
 parser = argparse.ArgumentParser()
-parser.add_argument("--fid",   required=True, help="Plant FID e.g. 0146")
-parser.add_argument("--gauge", required=True, help="Rain gauge site_id e.g. 1610")
-parser.add_argument("--start-year", type=int, help="Optional first year to process")
-parser.add_argument("--end-year", type=int, help="Optional last year to process")
+parser.add_argument("--fid",    required=True, help="Plant FID e.g. 0146")
+parser.add_argument("--gauge",  required=True, help="Rain gauge site_id e.g. 1610")
+parser.add_argument("--multi",  action="store_true", help="Use gauge-namespaced filenames (rain_g{gauge}_{year}.js)")
+parser.add_argument("--start-year", type=int)
+parser.add_argument("--end-year",   type=int)
 args = parser.parse_args()
 
-process_rain(args.fid, args.gauge, args.start_year, args.end_year)
+process_rain(args.fid, args.gauge, args.start_year, args.end_year, multi=args.multi)

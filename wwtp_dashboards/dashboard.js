@@ -6,7 +6,7 @@
   "use strict";
 
   const PUMP_COLORS = [
-    "#5da8ff", "#41b9a8", "#e6a52e", "#d46b2d",
+    "#5da8ff", "#66bb6a", "#e6a52e", "#d46b2d",
     "#cf4336", "#9b7fd4", "#74c6ea", "#6fd9cb",
     "#f4c26b", "#e89c76",
   ];
@@ -27,9 +27,11 @@
   let minuteCache = {};
   let rainMinuteCache = {};
   let charts = {};
+  let legendState = null;
+  let selectedRainGauge = null;
   let selectedSide = PLANT_CONFIG.pumpGroups ? "east" : null;
 
-  const sel = { years: [], months: [], days: [], weeks: [], gauges: [], includeRain: true };
+  const sel = { years: [], months: [], days: [], weeks: [], gauges: [], includeRain: false };
   let msYear = null;
   let msMonth = null;
   let msDay = null;
@@ -163,9 +165,13 @@
     return vals.length ? Math.min(...vals) : null;
   };
 
-  const hasRain = () => !!(PLANT_CONFIG.rain && PLANT_CONFIG.rain.gauge);
-  const rainEnabled = () => !hasRain() || sel.gauges.includes(PLANT_CONFIG.rain.gauge);
-  const showRainOverlay = () => hasRain() && rainEnabled() && sel.includeRain;
+  const hasRain = () => !!(PLANT_CONFIG.rain && (PLANT_CONFIG.rain.gauges || PLANT_CONFIG.rain.polygon || PLANT_CONFIG.rain.gauge));
+  const isMultiGauge = () => !!(PLANT_CONFIG.rain && PLANT_CONFIG.rain.gauges);
+  const isPolygonRain = () => !!(PLANT_CONFIG.rain && PLANT_CONFIG.rain.polygon);
+  const rainEnabled = () => isPolygonRain()
+    ? sel.includeRain
+    : (!hasRain() || isMultiGauge() || sel.gauges.includes(PLANT_CONFIG.rain.gauge));
+  const showRainOverlay = () => hasRain() && sel.includeRain;
   const hasSingleYear = () => sel.years.length === 1;
 
   function isoWeek(ts) {
@@ -293,11 +299,10 @@
     if (!datasets.length) return null;
     if (datasets.length === 1) return datasets[0];
     return {
-      plant: datasets[0].plant,
-      fid: datasets[0].fid,
-      gauge: datasets[0].gauge,
+      ...datasets[0],
       timestamps: datasets.flatMap(d => d.timestamps),
-      rain: datasets.flatMap(d => d.rain),
+      rain:       datasets.flatMap(d => d.rain),
+      freq:       datasets[0].freq ? datasets.flatMap(d => d.freq || []) : null,
     };
   }
 
@@ -306,16 +311,38 @@
       rainYearData = null;
       return;
     }
-    for (const year of years) {
-      if (!window.__wwtp_rain || !window.__wwtp_rain[year]) {
-        try {
-          await loadScript(PLANT_CONFIG.dataDir + "rain_" + year + ".js");
-        } catch (e) {
-          // Leave rain unavailable for this year if the file is missing.
+    if (isMultiGauge()) {
+      const gauge = selectedRainGauge || PLANT_CONFIG.rain.gauges[0].id;
+      const ns = `__wwtp_rain_g${gauge}`;
+      for (const year of years) {
+        if (!window[ns] || !window[ns][year]) {
+          try {
+            await loadScript(PLANT_CONFIG.dataDir + `rain_g${gauge}_${year}.js`);
+          } catch (e) {}
         }
       }
+      rainYearData = mergeRainYearsGauge(years, ns);
+    } else {
+      for (const year of years) {
+        if (!window.__wwtp_rain || !window.__wwtp_rain[year]) {
+          try {
+            await loadScript(PLANT_CONFIG.dataDir + "rain_" + year + ".js");
+          } catch (e) {}
+        }
+      }
+      rainYearData = mergeRainYears(years);
     }
-    rainYearData = mergeRainYears(years);
+  }
+
+  function mergeRainYearsGauge(years, ns) {
+    const datasets = years.map(year => window[ns] && window[ns][year]).filter(Boolean);
+    if (!datasets.length) return null;
+    if (datasets.length === 1) return datasets[0];
+    return {
+      ...datasets[0],
+      timestamps: datasets.flatMap(d => d.timestamps),
+      rain:       datasets.flatMap(d => d.rain),
+    };
   }
 
   async function loadYears(years) {
@@ -330,6 +357,7 @@
       const data = mergeYearData(years);
       if (!data) throw new Error("No yearly data found");
       yearData = data;
+      legendState = null;
       await loadRainYears(years);
       sel.months = [];
       sel.days = [];
@@ -371,6 +399,14 @@
     if (rainMinuteCache[key + "_loading"]) return null;
     rainMinuteCache[key + "_loading"] = true;
     try {
+      if (isMultiGauge()) {
+        const gauge = selectedRainGauge || PLANT_CONFIG.rain.gauges[0].id;
+        const ns = `__wwtp_rain_g${gauge}_min`;
+        await loadScript(PLANT_CONFIG.dataDir + `rain_g${gauge}_${key}_min.js`);
+        const data = window[ns] && window[ns][key];
+        if (data) rainMinuteCache[key] = data;
+        return data || null;
+      }
       await loadScript(PLANT_CONFIG.dataDir + "rain_" + key + "_min.js");
       const data = window.__wwtp_rain_min && window.__wwtp_rain_min[key];
       if (data) rainMinuteCache[key] = data;
@@ -684,7 +720,22 @@
   }
 
   function getRainViewData() {
-    if (!rainYearData || !rainEnabled()) return null;
+    if (!rainYearData) return null;
+
+    if (isPolygonRain()) {
+      // Daily sparse data — just month-filter the event days
+      if (!sel.months.length) return rainYearData;
+      const mask = rainYearData.timestamps.map(ts => sel.months.includes(+ts.substring(5, 7)));
+      const fi = arr => arr ? arr.filter((_, i) => mask[i]) : null;
+      return {
+        ...rainYearData,
+        timestamps: fi(rainYearData.timestamps),
+        rain:       fi(rainYearData.rain),
+        freq:       rainYearData.freq ? fi(rainYearData.freq) : null,
+      };
+    }
+
+    // Legacy hourly gauge path
     const resolution = getResolutionMode();
     if (resolution === "minute") {
       const keys = selectedMinuteKeys();
@@ -713,6 +764,24 @@
 
   function alignRainToTimestamps(targetTimestamps, rainVd) {
     if (!rainVd) return null;
+
+    // Polygon rain: daily sparse timestamps ("YYYY-MM-DD") — match by date prefix
+    if (rainVd.polygon || (rainVd.timestamps.length && rainVd.timestamps[0].length === 10)) {
+      const lookup = {};
+      rainVd.timestamps.forEach((ts, i) => {
+        lookup[ts] = { rain: rainVd.rain[i], freq: rainVd.freq ? rainVd.freq[i] : null };
+      });
+      return {
+        data: targetTimestamps.map(ts => {
+          const entry = lookup[ts.substring(0, 10)];
+          return entry ? entry.rain : null;
+        }),
+        freqByDate: lookup,
+        granularity: "daily",
+      };
+    }
+
+    // Legacy hourly / 5-min gauge path
     const lookup = Object.fromEntries(rainVd.timestamps.map((ts, index) => [ts, rainVd.rain[index]]));
     return {
       data: targetTimestamps.map(ts => {
@@ -810,10 +879,12 @@
     return { ...yAxisLeft(name), position: "right", splitLine: { show: false } };
   }
 
-  function yAxisRain() {
+  function yAxisRain(maxVal) {
     return {
       type: "value",
       min: 0,
+      max: maxVal > 0 ? maxVal * 2 : 2,
+      inverse: true,
       position: "right",
       offset: 58,
       axisLabel: { show: false },
@@ -892,7 +963,7 @@
       label: {
         color: "#eff5fb",
         fontSize: 10,
-        backgroundColor: "rgba(12,21,34,0.96)",
+        backgroundColor: hasRain() ? "rgba(12,21,34,0.55)" : "rgba(12,21,34,0.96)",
         borderColor: color,
         borderWidth: 1,
         borderRadius: 6,
@@ -915,7 +986,7 @@
   }
 
   function makeMixedComboOption(vd, metricKey, metricLabel, metricColor, metricMaxColor, rainVd) {
-    const rain = showRainOverlay() ? alignRainToTimestamps(vd.timestamps, rainVd) : null;
+    const rain = rainVd ? alignRainToTimestamps(vd.timestamps, rainVd) : null;
     const isBucketed = !!vd[metricKey + "_mean"];
     const mainData = isBucketed ? vd[metricKey + "_mean"] : vd[metricKey];
     const minData = isBucketed ? vd[metricKey + "_min"] : null;
@@ -927,14 +998,23 @@
     if (rain) legendNames.push("Rain, in");
     legendNames.push(isBucketed ? `${metricLabel} Mean` : metricLabel);
     if (maxData) legendNames.push(`${metricLabel} Max`);
+    const rainMax = rain
+      ? Math.max(...rain.data.filter(v => v != null && v > 0), 0.1)
+      : 0;
     const yAxes = [yAxisLeft("Pump Status (0/1)"), yAxisRight(metricLabel)];
-    if (rain) yAxes.push(yAxisRain());
+    if (rain) yAxes.push(yAxisRain(rainMax));
+
+    const usePillLegend = !!document.getElementById("chart-flow-legend");
+    const legendSelected = {};
+    legendNames.forEach(n => { legendSelected[n] = isLegendActive(n); });
 
     return {
       backgroundColor: "transparent",
       tooltip: tooltip({ granularity: vd.granularity, bucketStats }),
-      legend: legend(legendNames),
-      grid: { left: 70, right: 70, top: 44, bottom: 22 },
+      legend: usePillLegend
+        ? { show: false, data: legendNames, selected: legendSelected }
+        : { ...legend(legendNames), selected: legendSelected },
+      grid: { left: 70, right: 70, top: usePillLegend ? 16 : 44, bottom: 22 },
       xAxis: xAxisOpt(vd.timestamps, vd.granularity),
       yAxis: yAxes,
       series: [
@@ -943,7 +1023,7 @@
           type: "bar",
           stack: "pumps",
           yAxisIndex: 0,
-          itemStyle: { color: PUMP_COLORS[index % PUMP_COLORS.length], opacity: rain ? 0.26 : 1 },
+          itemStyle: { color: PUMP_COLORS[index % PUMP_COLORS.length] },
           data: vd.pump_status[pump],
           barMaxWidth: vd.granularity === "minute" ? 6 : 24,
           z: 1,
@@ -953,9 +1033,9 @@
           type: "bar",
           yAxisIndex: 2,
           data: rain.data,
-          barMaxWidth: vd.granularity === "minute" ? 8 : 16,
-          itemStyle: { color: "rgba(72,208,201,0.55)" },
-          emphasis: { itemStyle: { color: "rgba(72,208,201,0.78)" } },
+          barMaxWidth: vd.granularity === "minute" ? 6 : 12,
+          itemStyle: { color: "rgba(72,208,201,0.70)" },
+          emphasis: { itemStyle: { color: "rgba(72,208,201,0.90)" } },
           z: 4,
         }] : []),
         {
@@ -1048,18 +1128,114 @@
     };
   }
 
+  function colorWithAlpha(color, alpha) {
+    if (color.startsWith("#")) {
+      const r = parseInt(color.slice(1, 3), 16);
+      const g = parseInt(color.slice(3, 5), 16);
+      const b = parseInt(color.slice(5, 7), 16);
+      return `rgba(${r},${g},${b},${alpha})`;
+    }
+    return color.replace(/[\d.]+\)$/, `${alpha})`);
+  }
+
+  function isLegendActive(name) {
+    if (legendState === null || !(name in legendState)) {
+      return name !== "Rain, in";
+    }
+    return legendState[name];
+  }
+
+  function buildPillLegend(containerId, items, chart) {
+    const container = document.getElementById(containerId);
+    if (!container) return;
+
+    container.style.cssText = [
+      "display:flex", "flex-wrap:wrap", "gap:4px",
+      "padding:4px 14px 8px", "align-items:center", "justify-content:center",
+    ].join(";");
+
+    function render() {
+      container.innerHTML = "";
+      items.forEach(({ name, color, label }) => {
+        const active = isLegendActive(name);
+        const pill = document.createElement("button");
+        pill.type = "button";
+
+        const border = active ? color : "rgba(108,143,186,0.2)";
+        const text   = active ? color : "rgba(180,192,208,0.38)";
+        const bg     = active ? colorWithAlpha(color, 0.07) : "transparent";
+
+        pill.style.cssText = [
+          "display:inline-flex", "align-items:center", "gap:5px",
+          "padding:3px 9px 3px 7px", "border-radius:12px",
+          `border:1px solid ${border}`, `background:${bg}`, `color:${text}`,
+          "cursor:pointer", "font-size:11px", "font-weight:600",
+          "font-family:inherit", "transition:opacity 0.15s",
+          "user-select:none", "line-height:1.3",
+          active ? "" : "text-decoration:line-through",
+        ].join(";");
+
+        const swatch = document.createElement("span");
+        swatch.style.cssText = [
+          "width:8px", "height:4px", "border-radius:2px", "flex-shrink:0",
+          `background:${active ? color : "rgba(180,192,208,0.12)"}`,
+        ].join(";");
+
+        const txt = document.createElement("span");
+        txt.textContent = label || name;
+
+        pill.appendChild(swatch);
+        pill.appendChild(txt);
+
+        pill.addEventListener("mouseenter", () => { pill.style.opacity = "0.78"; });
+        pill.addEventListener("mouseleave", () => { pill.style.opacity = "1"; });
+
+        pill.addEventListener("click", () => {
+          if (!legendState) legendState = {};
+          legendState[name] = !isLegendActive(name);
+          if (name === "Rain, in") sel.includeRain = legendState[name];
+          chart.dispatchAction({ type: "legendToggleSelect", name });
+          render();
+        });
+
+        container.appendChild(pill);
+      });
+    }
+
+    render();
+  }
+
+  function rainFreqColor(freq) {
+    if (freq == null || freq <= 0) return RAIN_COLOR;
+    if (freq < 2)   return RAIN_COLOR;
+    if (freq < 5)   return "#f4c26b";
+    if (freq < 10)  return "#e6a52e";
+    if (freq < 25)  return "#d46b2d";
+    if (freq < 100) return "#cf4336";
+    return "#9b7fd4";
+  }
+
   function makeRainOption(vd) {
+    const hasFreq = Array.isArray(vd.freq) && vd.freq.some(v => v != null && v > 0);
+    const barData = hasFreq
+      ? vd.timestamps.map((_, i) => ({
+          value: vd.rain[i],
+          itemStyle: { color: rainFreqColor(vd.freq[i]) },
+        }))
+      : vd.rain;
+
+    const granularity = vd.granularity || (vd.polygon ? "daily" : "hourly");
+
     return {
       backgroundColor: "transparent",
-      tooltip: tooltip({ granularity: vd.granularity }),
+      tooltip: tooltip({ granularity }),
       grid: { left: 70, right: 20, top: 16, bottom: 22 },
-      xAxis: xAxisOpt(vd.timestamps, vd.granularity),
-      yAxis: yAxisLeft("Rainfall, in"),
+      xAxis: xAxisOpt(vd.timestamps, granularity),
+      yAxis: { ...yAxisLeft("Rainfall, in"), inverse: true },
       series: [{
-        name: "Rain, in",
+        name: "Rainfall, in",
         type: "bar",
-        data: vd.rain,
-        itemStyle: { color: RAIN_COLOR },
+        data: barData,
         barMaxWidth: 24,
       }],
     };
@@ -1188,14 +1364,41 @@
   }
 
   function renderCombined(vd, rainVd) {
+    const hasCombinedRainEl = !!document.getElementById("chart-combined-rain");
+    if (hasCombinedRainEl) {
+      renderRainChart("chart-combined-rain", rainVd);
+    }
+
+    const overlayRain = hasCombinedRainEl ? null : rainVd;
+
     const flowChart = initChart("chart-flow", "wwtp");
     if (flowChart) {
-      flowChart.setOption(makeMixedComboOption(vd, "flow", "Flow, MGD", FLOW_COLOR, FLOW_MAX_COLOR, rainVd));
+      flowChart.setOption(makeMixedComboOption(vd, "flow", "Flow, MGD", FLOW_COLOR, FLOW_MAX_COLOR, overlayRain));
+
+      if (document.getElementById("chart-flow-legend")) {
+        const isBucketed = !!vd.flow_mean;
+        const pillItems = [
+          ...vd.pumps.map((pump, i) => ({ name: pump, color: PUMP_COLORS[i % PUMP_COLORS.length] })),
+          ...(overlayRain ? [{ name: "Rain, in", color: RAIN_COLOR }] : []),
+          { name: isBucketed ? "Flow, MGD Mean" : "Flow, MGD", color: FLOW_COLOR,
+            label: isBucketed ? "Flow Mean" : "Flow, MGD" },
+          ...(isBucketed ? [{ name: "Flow, MGD Max", color: FLOW_MAX_COLOR, label: "Flow Max" }] : []),
+        ];
+        buildPillLegend("chart-flow-legend", pillItems, flowChart);
+      }
+
+      flowChart.on("legendselectchanged", params => {
+        if ("Rain, in" in params.selected) {
+          sel.includeRain = params.selected["Rain, in"];
+          if (legendState) legendState["Rain, in"] = sel.includeRain;
+          syncGaugeFilterUI();
+        }
+      });
     }
 
     const wwlChart = initChart("chart-wwl", "wwtp");
     if (wwlChart) {
-      wwlChart.setOption(makeMixedComboOption(vd, "wwl", "WWL, ft", WWL_COLOR, WWL_MAX_COLOR, rainVd));
+      wwlChart.setOption(makeMixedComboOption(vd, "wwl", "WWL, ft", WWL_COLOR, WWL_MAX_COLOR, overlayRain));
     }
   }
 
@@ -1267,13 +1470,22 @@
     msWeek.setOptions(weeks.map(week => ({ value: week, label: "Week " + week })));
   }
 
+  function syncGaugeFilterUI() {
+    const el = document.getElementById("ms-gauge-rain");
+    if (!el) return;
+    const label = el.closest("label");
+    if (label) label.style.display = (isMultiGauge() && sel.includeRain) ? "" : "none";
+  }
+
   function updateRainToggleUI() {
     const btn = document.getElementById("btn-rain-toggle");
-    if (!btn) return;
-    const enabled = rainEnabled();
-    btn.disabled = !enabled;
-    btn.classList.toggle("is-on", enabled && sel.includeRain);
-    btn.setAttribute("aria-pressed", enabled && sel.includeRain ? "true" : "false");
+    if (btn) {
+      const enabled = rainEnabled();
+      btn.disabled = !enabled;
+      btn.classList.toggle("is-on", enabled && sel.includeRain);
+      btn.setAttribute("aria-pressed", enabled && sel.includeRain ? "true" : "false");
+    }
+    syncGaugeFilterUI();
   }
 
   async function preloadSelectedDetailData() {
@@ -1288,7 +1500,7 @@
       })
     );
 
-    if (hasRain() && sel.gauges.length) {
+    if (hasRain() && !isPolygonRain() && (isMultiGauge() || sel.gauges.length)) {
       await Promise.all(keys.map(async key => {
         const [year, month] = key.split("_");
         await loadRainMinuteData(+year, +month);
@@ -1359,7 +1571,33 @@
       await refreshActiveView();
     }, { showAll: true });
 
-    if (hasRain()) {
+    if (isMultiGauge()) {
+      const gauges = PLANT_CONFIG.rain.gauges;
+      selectedRainGauge = gauges[0].id;
+
+      const msGaugeRain = createMultiSelect("ms-gauge-rain", "Gauge", async selected => {
+        if (!selected.length) return;
+        const gauge = selected[selected.length - 1];
+        if (gauge === selectedRainGauge) return;
+        selectedRainGauge = gauge;
+        rainYearData = null;
+        rainMinuteCache = {};
+        setLoading(true);
+        await loadRainYears(sel.years.length ? sel.years : meta.years);
+        setLoading(false);
+        renderActive();
+      }, { minSelected: 1 });
+
+      if (msGaugeRain) {
+        const shortLabel = lbl => lbl.replace(/ (Road|Street|Drive|Boulevard|Avenue|Lane)$/i, "");
+        msGaugeRain.setOptions(gauges.map(g => ({
+          value: g.id,
+          label: `${g.id} · ${shortLabel(g.label)}`,
+        })));
+        msGaugeRain.setSelected([gauges[0].id]);
+      }
+      syncGaugeFilterUI();
+    } else if (hasRain() && !isPolygonRain()) {
       msGauge = createMultiSelect("ms-gauge", "Gauge", async gauges => {
         sel.gauges = gauges;
         updateRainToggleUI();
@@ -1372,6 +1610,9 @@
         msGauge.setOptions([{ value: PLANT_CONFIG.rain.gauge, label: gaugeLabel }]);
         sel.gauges = [PLANT_CONFIG.rain.gauge];
         msGauge.setSelected(sel.gauges);
+      } else {
+        // No gauge dropdown in HTML — auto-enable the configured gauge silently
+        sel.gauges = [PLANT_CONFIG.rain.gauge];
       }
     }
 

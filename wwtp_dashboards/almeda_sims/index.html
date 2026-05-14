@@ -112,10 +112,17 @@
       background: linear-gradient(180deg, rgba(26,39,57,0.96), rgba(20,31,47,0.96));
       border: 1px solid var(--border); border-radius: 16px;
       padding: 12px 14px 10px; box-shadow: var(--shadow);
+      position: relative;
     }
     .chart-panel-title {
       font-size: 14px; font-weight: 700;
       color: rgba(221,232,244,0.9); margin-bottom: 6px;
+    }
+    .chart-corner-key {
+      position: absolute;
+      top: 12px;
+      right: 14px;
+      z-index: 2;
     }
     .chart-el { width: 100%; display: block; }
     #loading-msg, #status-msg {
@@ -221,6 +228,7 @@
     <div class="charts-wrap">
       <div class="chart-panel">
         <div class="chart-panel-title">Pumps Status vs. Flow, MGD</div>
+        <div id="chart-flow-thresholds" class="chart-corner-key"></div>
         <div id="chart-flow-legend"></div>
         <div id="chart-flow" class="chart-el" style="height:280px;"></div>
       </div>
@@ -269,6 +277,7 @@
           { id: 360, label: "Sims Bayou @ MLK Road" },
         ],
       },
+      permit: { aaf: 20.0 },
     };
   </script>
   <script src="../dashboard.js"></script>

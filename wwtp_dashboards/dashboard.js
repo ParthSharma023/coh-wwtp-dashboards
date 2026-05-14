@@ -15,6 +15,10 @@
   const WWL_COLOR = "#6ee7a0";
   const WWL_MAX_COLOR = "rgba(110,231,160,0.78)";
   const RAIN_COLOR = "#48d0c9";
+  const THRESHOLD_75_NAME = "75% Threshold";
+  const THRESHOLD_90_NAME = "90% Threshold";
+  const THRESHOLD_75_COLOR = "#f0bd4e";
+  const THRESHOLD_90_COLOR = "#ff9a76";
   const AXIS_COLOR = "rgba(180,192,208,0.45)";
   const SPLIT_COLOR = "rgba(180,192,208,0.07)";
   const TIP_BG = "#17273a";
@@ -809,6 +813,7 @@
     opts = opts || {};
     const granularity = opts.granularity || "hourly";
     const bucketStats = opts.bucketStats || null;
+    const hiddenSeries = new Set(opts.hiddenSeries || []);
     return {
       trigger: "axis",
       backgroundColor: TIP_BG,
@@ -819,6 +824,7 @@
         const axisTs = params[0] ? params[0].axisValue : "";
         let out = `<div style="margin-bottom:4px;font-weight:600">${fmtAxisValue(axisTs, granularity)}</div>`;
         params.forEach(p => {
+          if (hiddenSeries.has(p.seriesName)) return;
           if (p.value == null || p.value === "-") return;
           const raw = Array.isArray(p.value) ? p.value[1] : p.value;
           if (raw == null) return;
@@ -1000,6 +1006,76 @@
     };
   }
 
+  function permitMarkLine() {
+    const aaf = PLANT_CONFIG.permit && PLANT_CONFIG.permit.aaf;
+    if (!aaf) return null;
+    return {
+      silent: true,
+      symbol: ["none", "none"],
+      data: [
+        {
+          yAxis: aaf * 0.75,
+          name: "75%",
+          lineStyle: { color: "#e6a52e", type: "dashed", width: 1.5 },
+          label: { formatter: "75% · " + (aaf * 0.75).toFixed(1), color: "#e6a52e", fontSize: 10, position: "insideEndTop" },
+        },
+        {
+          yAxis: aaf * 0.90,
+          name: "90%",
+          lineStyle: { color: "#cf4336", type: "dashed", width: 1.5 },
+          label: { formatter: "90% · " + (aaf * 0.90).toFixed(1), color: "#cf4336", fontSize: 10, position: "insideEndTop" },
+        },
+      ],
+    };
+  }
+
+  function permitThresholdSeries(timestamps, yAxisIndex) {
+    const aaf = PLANT_CONFIG.permit && PLANT_CONFIG.permit.aaf;
+    if (!aaf) return [];
+    return [
+      {
+        name: THRESHOLD_75_NAME,
+        type: "line",
+        yAxisIndex,
+        data: timestamps.map(() => aaf * 0.75),
+        symbol: "none",
+        silent: true,
+        tooltip: { show: false },
+        connectNulls: true,
+        lineStyle: {
+          color: THRESHOLD_75_COLOR,
+          type: "dashed",
+          width: 2.2,
+          opacity: 0.95,
+          shadowBlur: 6,
+          shadowColor: "rgba(240,189,78,0.30)",
+        },
+        itemStyle: { color: THRESHOLD_75_COLOR },
+        z: 6,
+      },
+      {
+        name: THRESHOLD_90_NAME,
+        type: "line",
+        yAxisIndex,
+        data: timestamps.map(() => aaf * 0.90),
+        symbol: "none",
+        silent: true,
+        tooltip: { show: false },
+        connectNulls: true,
+        lineStyle: {
+          color: THRESHOLD_90_COLOR,
+          type: "dashed",
+          width: 2.2,
+          opacity: 0.95,
+          shadowBlur: 6,
+          shadowColor: "rgba(255,154,118,0.30)",
+        },
+        itemStyle: { color: THRESHOLD_90_COLOR },
+        z: 6,
+      },
+    ];
+  }
+
   function makeMixedComboOption(vd, metricKey, metricLabel, metricColor, metricMaxColor, rainVd) {
     const rain = rainVd ? alignRainToTimestamps(vd.timestamps, rainVd) : null;
     const isBucketed = !!vd[metricKey + "_mean"];
@@ -1009,10 +1085,12 @@
     const bucketStats = isBucketed
       ? Object.fromEntries(vd.timestamps.map((ts, index) => [ts, { label: metricLabel, min: minData[index], max: maxData[index] }]))
       : null;
+    const thresholdSeries = metricKey === "flow" ? permitThresholdSeries(vd.timestamps, 1) : [];
     const legendNames = [...vd.pumps];
     if (rain) legendNames.push("Rain, in");
     legendNames.push(isBucketed ? `${metricLabel} Mean` : metricLabel);
     if (maxData) legendNames.push(`${metricLabel} Max`);
+    thresholdSeries.forEach(series => legendNames.push(series.name));
     const rainMax = rain
       ? Math.max(...rain.data.filter(v => v != null && v > 0), 0.1)
       : 0;
@@ -1021,11 +1099,18 @@
 
     const usePillLegend = !!document.getElementById("chart-flow-legend");
     const legendSelected = {};
-    legendNames.forEach(n => { legendSelected[n] = isLegendActive(n); });
+    legendNames.forEach(n => {
+      const defaultActive = usePillLegend && (n === THRESHOLD_75_NAME || n === THRESHOLD_90_NAME) ? false : undefined;
+      legendSelected[n] = isLegendActive(n, defaultActive);
+    });
 
     return {
       backgroundColor: "transparent",
-      tooltip: tooltip({ granularity: vd.granularity, bucketStats }),
+      tooltip: tooltip({
+        granularity: vd.granularity,
+        bucketStats,
+        hiddenSeries: [THRESHOLD_75_NAME, THRESHOLD_90_NAME],
+      }),
       legend: usePillLegend
         ? { show: false, data: legendNames, selected: legendSelected }
         : { ...legend(legendNames), selected: legendSelected },
@@ -1053,6 +1138,7 @@
           emphasis: { itemStyle: { color: "rgba(72,208,201,0.90)" } },
           z: 4,
         }] : []),
+        ...thresholdSeries,
         {
           name: isBucketed ? `${metricLabel} Mean` : metricLabel,
           type: "line",
@@ -1108,17 +1194,24 @@
     const bucketStats = isBucketed
       ? Object.fromEntries(vd.timestamps.map((ts, index) => [ts, { label, min: minData[index], max: maxData[index] }]))
       : null;
+    const thresholdSeries = metricKey === "flow" ? permitThresholdSeries(vd.timestamps, 0) : [];
     const legendNames = [isBucketed ? `${label} Mean` : label];
     if (maxData) legendNames.push(`${label} Max`);
+    thresholdSeries.forEach(series => legendNames.push(series.name));
 
     return {
       backgroundColor: "transparent",
-      tooltip: tooltip({ granularity: vd.granularity, bucketStats }),
+      tooltip: tooltip({
+        granularity: vd.granularity,
+        bucketStats,
+        hiddenSeries: [THRESHOLD_75_NAME, THRESHOLD_90_NAME],
+      }),
       legend: legend(legendNames),
       grid: { left: 70, right: 20, top: 36, bottom: chartBottomPadding(vd.granularity), containLabel: true },
       xAxis: xAxisOpt(vd.timestamps, vd.granularity),
       yAxis: { ...yAxisLeft(label), min: undefined },
       series: [
+        ...thresholdSeries,
         {
           name: isBucketed ? `${label} Mean` : label,
           type: "line",
@@ -1153,8 +1246,9 @@
     return color.replace(/[\d.]+\)$/, `${alpha})`);
   }
 
-  function isLegendActive(name) {
+  function isLegendActive(name, fallback) {
     if (legendState === null || !(name in legendState)) {
+      if (fallback != null) return fallback;
       return name !== "Rain, in";
     }
     return legendState[name];
@@ -1214,6 +1308,60 @@
         });
 
         container.appendChild(pill);
+      });
+    }
+
+    render();
+  }
+
+  function buildThresholdKey(containerId, items, chart) {
+    const container = document.getElementById(containerId);
+    if (!container) return;
+
+    container.style.cssText = [
+      "display:flex", "flex-wrap:wrap", "gap:10px",
+      "padding:0", "align-items:center", "justify-content:flex-end",
+      "min-height:20px", "align-self:start",
+    ].join(";");
+
+    function render() {
+      container.innerHTML = "";
+      items.forEach(({ name, color, label }) => {
+        const active = isLegendActive(name, false);
+        const button = document.createElement("button");
+        button.type = "button";
+        button.style.cssText = [
+          "display:inline-flex", "align-items:center", "gap:8px",
+          "padding:0", "border:none", "background:transparent",
+          `color:${active ? "#cfd8e6" : "rgba(180,192,208,0.42)"}`,
+          "cursor:pointer", "font-size:10px", "font-weight:600",
+          "font-family:inherit", "line-height:1.2", "user-select:none",
+          "transition:opacity 0.15s,color 0.15s",
+        ].join(";");
+
+        const swatch = document.createElement("span");
+        swatch.style.cssText = [
+          "width:10px", "height:10px", "flex-shrink:0",
+          `border:2px dashed ${active ? color : "rgba(180,192,208,0.28)"}`,
+          "border-radius:2px", "background:transparent",
+        ].join(";");
+
+        const text = document.createElement("span");
+        text.textContent = label || name;
+
+        button.appendChild(swatch);
+        button.appendChild(text);
+
+        button.addEventListener("mouseenter", () => { button.style.opacity = "0.78"; });
+        button.addEventListener("mouseleave", () => { button.style.opacity = "1"; });
+        button.addEventListener("click", () => {
+          if (!legendState) legendState = {};
+          legendState[name] = !isLegendActive(name, false);
+          chart.dispatchAction({ type: "legendToggleSelect", name });
+          render();
+        });
+
+        container.appendChild(button);
       });
     }
 
@@ -1313,11 +1461,49 @@
     };
   }
 
+  function renderPermitPanel() {
+    const aaf = PLANT_CONFIG.permit && PLANT_CONFIG.permit.aaf;
+    if (!aaf) return;
+    const container = document.getElementById("filter-stats");
+    if (!container || container.querySelector(".permit-group")) return;
+
+    const divider = document.createElement("div");
+    divider.className = "fstat-divider";
+
+    const group = document.createElement("div");
+    group.className = "fstat-group permit-group";
+    group.innerHTML =
+      '<div class="fstat-label">Permit, MGD</div>' +
+      '<table class="fstat-table"><tbody>' +
+      '<tr><th>Limit</th><td>' + aaf.toFixed(1) + '</td></tr>' +
+      '<tr><th>75%</th><td style="color:#e6a52e">' + (aaf * 0.75).toFixed(1) + '</td></tr>' +
+      '<tr><th>90%</th><td style="color:#cf4336">' + (aaf * 0.90).toFixed(1) + '</td></tr>' +
+      '</tbody></table>';
+
+    container.appendChild(divider);
+    container.appendChild(group);
+  }
+
   function renderStatisticsPanel(slice) {
     const fmt = value => (value == null ? "—" : value.toFixed(2));
+    const permitAaf = PLANT_CONFIG.permit && PLANT_CONFIG.permit.aaf;
     const set = (id, value) => {
       const el = document.getElementById(id);
-      if (el) el.textContent = fmt(value);
+      if (!el) return;
+      el.textContent = fmt(value);
+      if (permitAaf && id.startsWith("stat-flow-") && value != null) {
+        const ratio = value / permitAaf;
+        if (ratio >= 0.90) {
+          el.style.color = "#cf4336";
+          el.style.fontWeight = "700";
+        } else if (ratio >= 0.75) {
+          el.style.color = "#e6a52e";
+          el.style.fontWeight = "700";
+        } else {
+          el.style.color = "";
+          el.style.fontWeight = "";
+        }
+      }
     };
 
     const daily = ts => ts.substring(0, 10);
@@ -1401,12 +1587,24 @@
         ];
         buildPillLegend("chart-flow-legend", pillItems, flowChart);
       }
+      if (document.getElementById("chart-flow-thresholds") && PLANT_CONFIG.permit && PLANT_CONFIG.permit.aaf) {
+        buildThresholdKey("chart-flow-thresholds", [
+          { name: THRESHOLD_75_NAME, color: THRESHOLD_75_COLOR },
+          { name: THRESHOLD_90_NAME, color: THRESHOLD_90_COLOR },
+        ], flowChart);
+      }
 
       flowChart.on("legendselectchanged", params => {
         if ("Rain, in" in params.selected) {
           sel.includeRain = params.selected["Rain, in"];
           if (legendState) legendState["Rain, in"] = sel.includeRain;
           syncGaugeFilterUI();
+        }
+        if (document.getElementById("chart-flow-thresholds") && PLANT_CONFIG.permit && PLANT_CONFIG.permit.aaf) {
+          buildThresholdKey("chart-flow-thresholds", [
+            { name: THRESHOLD_75_NAME, color: THRESHOLD_75_COLOR },
+            { name: THRESHOLD_90_NAME, color: THRESHOLD_90_COLOR },
+          ], flowChart);
         }
       });
     }
@@ -1545,6 +1743,7 @@
   async function init() {
     const title = document.getElementById("plant-title");
     if (title) title.textContent = PLANT_CONFIG.name;
+    renderPermitPanel();
 
     try {
       await loadScript(PLANT_CONFIG.dataDir + "meta.js");

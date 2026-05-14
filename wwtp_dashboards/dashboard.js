@@ -165,6 +165,14 @@
     return vals.length ? Math.min(...vals) : null;
   };
 
+  function stablePumpColor(pump) {
+    const ref = PLANT_CONFIG.pumpGroups
+      ? (PLANT_CONFIG.pumpGroups[selectedSide] || (yearData && yearData.pumps) || [])
+      : ((yearData && yearData.pumps) || []);
+    const idx = ref.indexOf(pump);
+    return PUMP_COLORS[(idx >= 0 ? idx : 0) % PUMP_COLORS.length];
+  }
+
   const hasRain = () => !!(PLANT_CONFIG.rain && (PLANT_CONFIG.rain.gauges || PLANT_CONFIG.rain.polygon || PLANT_CONFIG.rain.gauge));
   const isMultiGauge = () => !!(PLANT_CONFIG.rain && PLANT_CONFIG.rain.gauges);
   const isPolygonRain = () => !!(PLANT_CONFIG.rain && PLANT_CONFIG.rain.polygon);
@@ -852,6 +860,7 @@
       axisLabel: {
         color: "#b4c0d0",
         fontSize: 11,
+        margin: 12,
         interval,
         formatter: ts => fmtLabel(ts, granularity),
         rotate: count > 200 ? 30 : 0,
@@ -860,6 +869,12 @@
       axisTick: { lineStyle: { color: AXIS_COLOR } },
       splitLine: { show: false },
     };
+  }
+
+  function chartBottomPadding(granularity) {
+    if (granularity === "daily") return 34;
+    if (granularity === "minute" || granularity === "5min") return 50;
+    return 44;
   }
 
   function yAxisLeft(name) {
@@ -1014,7 +1029,7 @@
       legend: usePillLegend
         ? { show: false, data: legendNames, selected: legendSelected }
         : { ...legend(legendNames), selected: legendSelected },
-      grid: { left: 70, right: 70, top: usePillLegend ? 16 : 44, bottom: 22 },
+      grid: { left: 70, right: 70, top: usePillLegend ? 30 : 44, bottom: chartBottomPadding(vd.granularity), containLabel: true },
       xAxis: xAxisOpt(vd.timestamps, vd.granularity),
       yAxis: yAxes,
       series: [
@@ -1023,7 +1038,7 @@
           type: "bar",
           stack: "pumps",
           yAxisIndex: 0,
-          itemStyle: { color: PUMP_COLORS[index % PUMP_COLORS.length] },
+          itemStyle: { color: stablePumpColor(pump) },
           data: vd.pump_status[pump],
           barMaxWidth: vd.granularity === "minute" ? 6 : 24,
           z: 1,
@@ -1071,7 +1086,7 @@
       backgroundColor: "transparent",
       tooltip: tooltip({ granularity: vd.granularity }),
       legend: legend(vd.pumps),
-      grid: { left: 70, right: 20, top: 36, bottom: 22 },
+      grid: { left: 70, right: 20, top: 36, bottom: chartBottomPadding(vd.granularity), containLabel: true },
       xAxis: xAxisOpt(vd.timestamps, vd.granularity),
       yAxis: yAxisLeft("Pump Status (0/1)"),
       series: vd.pumps.map((pump, index) => ({
@@ -1100,7 +1115,7 @@
       backgroundColor: "transparent",
       tooltip: tooltip({ granularity: vd.granularity, bucketStats }),
       legend: legend(legendNames),
-      grid: { left: 70, right: 20, top: 36, bottom: 22 },
+      grid: { left: 70, right: 20, top: 36, bottom: chartBottomPadding(vd.granularity), containLabel: true },
       xAxis: xAxisOpt(vd.timestamps, vd.granularity),
       yAxis: { ...yAxisLeft(label), min: undefined },
       series: [
@@ -1229,7 +1244,7 @@
     return {
       backgroundColor: "transparent",
       tooltip: tooltip({ granularity }),
-      grid: { left: 70, right: 20, top: 16, bottom: 22 },
+      grid: { left: 70, right: 20, top: 16, bottom: chartBottomPadding(vd.granularity), containLabel: true },
       xAxis: xAxisOpt(vd.timestamps, granularity),
       yAxis: { ...yAxisLeft("Rainfall, in"), inverse: true },
       series: [{
@@ -1378,7 +1393,7 @@
       if (document.getElementById("chart-flow-legend")) {
         const isBucketed = !!vd.flow_mean;
         const pillItems = [
-          ...vd.pumps.map((pump, i) => ({ name: pump, color: PUMP_COLORS[i % PUMP_COLORS.length] })),
+          ...vd.pumps.map(pump => ({ name: pump, color: stablePumpColor(pump) })),
           ...(overlayRain ? [{ name: "Rain, in", color: RAIN_COLOR }] : []),
           { name: isBucketed ? "Flow, MGD Mean" : "Flow, MGD", color: FLOW_COLOR,
             label: isBucketed ? "Flow Mean" : "Flow, MGD" },
@@ -1585,7 +1600,7 @@
         setLoading(true);
         await loadRainYears(sel.years.length ? sel.years : meta.years);
         setLoading(false);
-        renderActive();
+        await refreshActiveView();
       }, { minSelected: 1 });
 
       if (msGaugeRain) {

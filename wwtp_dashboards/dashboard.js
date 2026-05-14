@@ -1849,8 +1849,12 @@
     await loadYears([defaultYear]);
 
     const _now = new Date();
-    const _prevMonth = _now.getMonth() || 12; // getMonth() is 0-indexed: 0=Jan→use 12(Dec), otherwise it's already the previous month number
-    const defaultMonth = defaultYear === _now.getFullYear() ? _prevMonth : 1;
+    const _curMonth = _now.getMonth() + 1;
+    const _prevMonth = _curMonth === 1 ? 12 : _curMonth - 1;
+    const _availMonths = new Set((yearData ? yearData.timestamps : []).map(ts => +ts.substring(5, 7)));
+    const defaultMonth = defaultYear === _now.getFullYear()
+      ? (_availMonths.has(_curMonth) ? _curMonth : _prevMonth)
+      : 1;
     sel.months = [defaultMonth];
     if (msMonth) msMonth.setSelected([defaultMonth]);
     populateWeeks([defaultMonth]);

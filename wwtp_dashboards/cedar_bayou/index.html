@@ -189,6 +189,7 @@
     <div class="charts-wrap">
       <div class="chart-panel">
         <div class="chart-panel-title">Pumps Status vs. Flow, MGD</div>
+        <div id="chart-flow-thresholds" class="chart-corner-key"></div>
         <div id="chart-flow-legend"></div>
         <div id="chart-flow" class="chart-el" style="height:280px;"></div>
       </div>
@@ -226,9 +227,10 @@
       name:    "Cedar Bayou WWTP",
       fid:     "0244",
       dataDir: "./data/",
+      permit: { aaf: 1.5 },
       rain: {
-        gauge: 1940,
-        label: "Luce Bayou @ FM",
+        gauge: 740,
+        label: "Lake Houston @ FM 1960",
       },
     };
   </script>

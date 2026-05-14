@@ -189,6 +189,7 @@
     <div class="charts-wrap">
       <div class="chart-panel">
         <div class="chart-panel-title">Pumps Status vs. Flow, MGD</div>
+        <div id="chart-flow-thresholds" class="chart-corner-key"></div>
         <div id="chart-flow-legend"></div>
         <div id="chart-flow" class="chart-el" style="height:300px;"></div>
       </div>
@@ -226,6 +227,13 @@
       name:    "S.W. Treatment Plant",
       fid:     "0190",
       dataDir: "./data/",
+      permit: { aaf: 60.0 },
+      rain: {
+                gauges: [
+                  { id: 440, label: "Brays Bayou @ Rice Avenue" },
+                  { id: 460, label: "Brays Bayou @ Gessner Road" },
+                ],
+              },
     };
   </script>
   <script src="../dashboard.js"></script>

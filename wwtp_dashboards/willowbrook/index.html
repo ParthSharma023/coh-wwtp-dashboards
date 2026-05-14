@@ -223,6 +223,7 @@
     <div class="charts-wrap">
       <div class="chart-panel">
         <div class="chart-panel-title">Pumps Status vs. Flow, MGD</div>
+        <div id="chart-flow-thresholds" class="chart-corner-key"></div>
         <div id="chart-flow-legend"></div>
         <div id="chart-flow" class="chart-el" style="height:300px;"></div>
       </div>
@@ -260,6 +261,13 @@
       name:    "Willowbrook WWTP",
       fid:     "0469",
       dataDir: "./data/",
+      permit: { aaf: 2.0 },
+      rain: {
+                gauges: [
+                  { id: 1670, label: "Greens Bayou @ Cutten Road" },
+                  { id: 1150, label: "Cypress Creek @ SH 249" },
+                ],
+              },
     };
   </script>
   <script src="../dashboard.js"></script>

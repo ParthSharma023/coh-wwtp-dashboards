@@ -189,6 +189,7 @@
     <div class="charts-wrap">
       <div class="chart-panel">
         <div class="chart-panel-title">Pumps Status vs. Flow, MGD</div>
+        <div id="chart-flow-thresholds" class="chart-corner-key"></div>
         <div id="chart-flow-legend"></div>
         <div id="chart-flow" class="chart-el" style="height:300px;"></div>
       </div>
@@ -226,6 +227,13 @@
       name:    "Imperial Valley WWTP",
       fid:     "0268",
       dataDir: "./data/",
+      permit: { aaf: 4.0 },
+      rain: {
+                gauges: [
+                  { id: 1695, label: "P138 @ Aldine Westfield Road" },
+                  { id: 1660, label: "Greens Bayou @ Knobcrest Drive" },
+                ],
+              },
     };
   </script>
   <script src="../dashboard.js"></script>

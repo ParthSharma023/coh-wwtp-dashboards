@@ -189,6 +189,7 @@
     <div class="charts-wrap">
       <div class="chart-panel">
         <div class="chart-panel-title">Pumps Status vs. Flow, MGD</div>
+        <div id="chart-flow-thresholds" class="chart-corner-key"></div>
         <div id="chart-flow-legend"></div>
         <div id="chart-flow" class="chart-el" style="height:300px;"></div>
       </div>
@@ -226,6 +227,13 @@
       name:    "Northbelt WWTP",
       fid:     "0252",
       dataDir: "./data/",
+      permit: { aaf: 5.0 },
+      rain: {
+                gauges: [
+                  { id: 1650, label: "Garners Bayou @ Rankin Road" },
+                  { id: 1640, label: "Greens Bayou @ US 59" },
+                ],
+              },
     };
   </script>
   <script src="../dashboard.js"></script>

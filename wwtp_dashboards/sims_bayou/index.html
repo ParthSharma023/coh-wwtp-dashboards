@@ -189,6 +189,7 @@
     <div class="charts-wrap">
       <div class="chart-panel">
         <div class="chart-panel-title">Pumps Status vs. Flow, MGD</div>
+        <div id="chart-flow-thresholds" class="chart-corner-key"></div>
         <div id="chart-flow-legend"></div>
         <div id="chart-flow" class="chart-el" style="height:300px;"></div>
       </div>
@@ -226,6 +227,13 @@
       name:    "Sims Bayou WWTP",
       fid:     "0183",
       dataDir: "./data/",
+      permit: { aaf: 25.0 },
+      rain: {
+                gauges: [
+                  { id: 410, label: "Brays Bayou @ Lawndale Street" },
+                  { id: 405, label: "Brays Bayou @ Martin Luther King Blvd" },
+                ],
+              },
     };
   </script>
   <script src="../dashboard.js"></script>

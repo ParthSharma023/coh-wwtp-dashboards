@@ -189,6 +189,7 @@
     <div class="charts-wrap">
       <div class="chart-panel">
         <div class="chart-panel-title">Pumps Status vs. Flow, MGD</div>
+        <div id="chart-flow-thresholds" class="chart-corner-key"></div>
         <div id="chart-flow-legend"></div>
         <div id="chart-flow" class="chart-el" style="height:300px;"></div>
       </div>
@@ -226,6 +227,7 @@
       name:    "Metro Central WWTP",
       fid:     "0397",
       dataDir: "./data/",
+      permit: { aaf: 5.0 },
     };
   </script>
   <script src="../dashboard.js"></script>

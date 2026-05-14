@@ -189,6 +189,7 @@
     <div class="charts-wrap">
       <div class="chart-panel">
         <div class="chart-panel-title">Pumps Status vs. Flow, MGD</div>
+        <div id="chart-flow-thresholds" class="chart-corner-key"></div>
         <div id="chart-flow-legend"></div>
         <div id="chart-flow" class="chart-el" style="height:280px;"></div>
       </div>
@@ -226,10 +227,13 @@
       name:    "Northwest WWTP",
       fid:     "0145",
       dataDir: "./data/",
+      permit: { aaf: 18.0 },
       rain: {
-        gauge: 582,
-        label: "Brickhouse Gully @ Hollister",
-      },
+                gauges: [
+                  { id: 585, label: "Vogel Creek @ Victory Drive" },
+                  { id: 582, label: "Brickhouse Gully @ Hollister" },
+                ],
+              },
     };
   </script>
   <script src="../dashboard.js"></script>

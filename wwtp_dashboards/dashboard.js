@@ -179,7 +179,7 @@
 
   const hasRain = () => !!(PLANT_CONFIG.rain && (PLANT_CONFIG.rain.gauges || PLANT_CONFIG.rain.polygon || PLANT_CONFIG.rain.gauge));
   const isMultiGauge = () => !!(PLANT_CONFIG.rain && PLANT_CONFIG.rain.gauges);
-  const isPolygonRain = () => !!(PLANT_CONFIG.rain && PLANT_CONFIG.rain.polygon);
+  const isPolygonRain = () => !!(PLANT_CONFIG.rain && PLANT_CONFIG.rain.polygon) || !!(rainYearData && rainYearData.polygon);
   const rainEnabled = () => isPolygonRain()
     ? sel.includeRain
     : (!hasRain() || isMultiGauge() || sel.gauges.includes(PLANT_CONFIG.rain.gauge));
@@ -1848,7 +1848,9 @@
     msYear.setSelected([defaultYear]);
     await loadYears([defaultYear]);
 
-    const defaultMonth = defaultYear === 2026 && meta.years.includes(2026) ? 5 : 1;
+    const _now = new Date();
+    const _prevMonth = _now.getMonth() || 12; // getMonth() is 0-indexed: 0=Jan→use 12(Dec), otherwise it's already the previous month number
+    const defaultMonth = defaultYear === _now.getFullYear() ? _prevMonth : 1;
     sel.months = [defaultMonth];
     if (msMonth) msMonth.setSelected([defaultMonth]);
     populateWeeks([defaultMonth]);

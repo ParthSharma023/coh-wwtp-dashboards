@@ -222,6 +222,7 @@
     <div class="charts-wrap">
       <div class="chart-panel">
         <div class="chart-panel-title">Pumps Status vs. Flow, MGD</div>
+        <div id="chart-flow-thresholds" class="chart-corner-key"></div>
         <div id="chart-flow-legend"></div>
         <div id="chart-flow" class="chart-el" style="height:300px;"></div>
       </div>
@@ -259,6 +260,7 @@
       name:    "Northeast WWTP",
       fid:     "0146",
       dataDir: "./data/",
+      permit: { aaf: 7.25 },
       rain: {
         gauge: "1610",
         label: "Greens Bayou @ Normandy Street",

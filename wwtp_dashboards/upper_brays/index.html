@@ -189,6 +189,7 @@
     <div class="charts-wrap">
       <div class="chart-panel">
         <div class="chart-panel-title">Pumps Status vs. Flow, MGD</div>
+        <div id="chart-flow-thresholds" class="chart-corner-key"></div>
         <div id="chart-flow-legend"></div>
         <div id="chart-flow" class="chart-el" style="height:300px;"></div>
       </div>
@@ -226,6 +227,13 @@
       name:    "Upper Brays WWTP",
       fid:     "0286",
       dataDir: "./data/",
+      permit: { aaf: 18.0 },
+      rain: {
+                gauges: [
+                  { id: 2290, label: "Buffalo Bayou @ Dairy Ashford Road" },
+                  { id: 2265, label: "Buffalo Bayou @ Piney Point Rd" },
+                ],
+              },
     };
   </script>
   <script src="../dashboard.js"></script>

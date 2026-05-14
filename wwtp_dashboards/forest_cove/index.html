@@ -189,6 +189,7 @@
     <div class="charts-wrap">
       <div class="chart-panel">
         <div class="chart-panel-title">Pumps Status vs. Flow, MGD</div>
+        <div id="chart-flow-thresholds" class="chart-corner-key"></div>
         <div id="chart-flow-legend"></div>
         <div id="chart-flow" class="chart-el" style="height:300px;"></div>
       </div>
@@ -226,6 +227,13 @@
       name:    "Forest Cove WWTP",
       fid:     "0565",
       dataDir: "./data/",
+      permit: { aaf: 0.95 },
+      rain: {
+                gauges: [
+                  { id: 760, label: "San Jacinto River @ US 59" },
+                  { id: 755, label: "San Jacinto River @ Kingwood Country Club" },
+                ],
+              },
     };
   </script>
   <script src="../dashboard.js"></script>

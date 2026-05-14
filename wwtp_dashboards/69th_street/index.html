@@ -189,6 +189,7 @@
     <div class="charts-wrap">
       <div class="chart-panel">
         <div class="chart-panel-title">Pumps Status vs. Flow, MGD</div>
+        <div id="chart-flow-thresholds" class="chart-corner-key"></div>
         <div id="chart-flow-legend"></div>
         <div id="chart-flow" class="chart-el" style="height:280px;"></div>
       </div>
@@ -226,10 +227,13 @@
       name:    "69th Street WWTP",
       fid:     "0400",
       dataDir: "./data/",
+      permit: { aaf: 200.0 },
       rain: {
-        gauge: 2240,
-        label: "Buffalo Bayou @ Shepherd Drive",
-      },
+                gauges: [
+                  { id: 2220, label: "Buffalo Bayou @ Milam Street" },
+                  { id: 2240, label: "Buffalo Bayou @ Shepherd Drive" },
+                ],
+              },
     };
   </script>
   <script src="../dashboard.js"></script>

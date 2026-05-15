@@ -19,6 +19,8 @@
   const THRESHOLD_90_NAME = "90% Threshold";
   const THRESHOLD_75_COLOR = "#f0bd4e";
   const THRESHOLD_90_COLOR = "#ff9a76";
+  const CRITICAL_WWL_NAME = "Critical WWL";
+  const CRITICAL_WWL_COLOR = "#f48adf";
   const AXIS_COLOR = "rgba(180,192,208,0.45)";
   const SPLIT_COLOR = "rgba(180,192,208,0.07)";
   const TIP_BG = "#17273a";
@@ -883,6 +885,18 @@
     return 44;
   }
 
+  function xDataZoom() {
+    return [{
+      type: "inside",
+      xAxisIndex: 0,
+      filterMode: "none",
+      zoomOnMouseWheel: true,
+      moveOnMouseWheel: false,
+      moveOnMouseMove: true,
+      preventDefaultMouseMove: false,
+    }];
+  }
+
   function yAxisLeft(name) {
     return {
       type: "value",
@@ -1076,6 +1090,53 @@
     ];
   }
 
+  function criticalWwlValue() {
+    const cfg = PLANT_CONFIG.criticalWwl;
+    if (!cfg) return null;
+    if (typeof cfg === "number") return cfg;
+    if (selectedSide && cfg[selectedSide] != null) return cfg[selectedSide];
+    if (cfg.default != null) return cfg.default;
+    const first = Object.values(cfg).find(value => typeof value === "number");
+    return first == null ? null : first;
+  }
+
+  function criticalWwlLabel() {
+    const value = criticalWwlValue();
+    if (value == null) return CRITICAL_WWL_NAME;
+    return `${CRITICAL_WWL_NAME} (${(+value).toFixed(0)} ft)`;
+  }
+
+  function criticalWwlSeries(timestamps, yAxisIndex) {
+    const value = criticalWwlValue();
+    if (value == null) return [];
+    return [{
+      name: CRITICAL_WWL_NAME,
+      type: "line",
+      yAxisIndex,
+      data: timestamps.map(() => value),
+      symbol: "none",
+      silent: true,
+      tooltip: { show: false },
+      connectNulls: true,
+      lineStyle: {
+        color: CRITICAL_WWL_COLOR,
+        type: "dashed",
+        width: 2.1,
+        opacity: 0.92,
+        shadowBlur: 6,
+        shadowColor: "rgba(244,138,223,0.28)",
+      },
+      itemStyle: { color: CRITICAL_WWL_COLOR },
+      z: 6,
+    }];
+  }
+
+  function metricReferenceSeries(metricKey, timestamps, yAxisIndex) {
+    if (metricKey === "flow") return permitThresholdSeries(timestamps, yAxisIndex);
+    if (metricKey === "wwl") return criticalWwlSeries(timestamps, yAxisIndex);
+    return [];
+  }
+
   function makeMixedComboOption(vd, metricKey, metricLabel, metricColor, metricMaxColor, rainVd) {
     const rain = rainVd ? alignRainToTimestamps(vd.timestamps, rainVd) : null;
     const isBucketed = !!vd[metricKey + "_mean"];
@@ -1085,7 +1146,7 @@
     const bucketStats = isBucketed
       ? Object.fromEntries(vd.timestamps.map((ts, index) => [ts, { label: metricLabel, min: minData[index], max: maxData[index] }]))
       : null;
-    const thresholdSeries = metricKey === "flow" ? permitThresholdSeries(vd.timestamps, 1) : [];
+    const thresholdSeries = metricReferenceSeries(metricKey, vd.timestamps, 1);
     const legendNames = [...vd.pumps];
     if (rain) legendNames.push("Rain, in");
     legendNames.push(isBucketed ? `${metricLabel} Mean` : metricLabel);
@@ -1109,12 +1170,13 @@
       tooltip: tooltip({
         granularity: vd.granularity,
         bucketStats,
-        hiddenSeries: [THRESHOLD_75_NAME, THRESHOLD_90_NAME],
+        hiddenSeries: [THRESHOLD_75_NAME, THRESHOLD_90_NAME, CRITICAL_WWL_NAME],
       }),
       legend: usePillLegend
         ? { show: false, data: legendNames, selected: legendSelected }
         : { ...legend(legendNames), selected: legendSelected },
       grid: { left: 70, right: 70, top: usePillLegend ? 30 : 44, bottom: chartBottomPadding(vd.granularity), containLabel: true },
+      dataZoom: xDataZoom(),
       xAxis: xAxisOpt(vd.timestamps, vd.granularity),
       yAxis: yAxes,
       series: [
@@ -1173,6 +1235,7 @@
       tooltip: tooltip({ granularity: vd.granularity }),
       legend: legend(vd.pumps),
       grid: { left: 70, right: 20, top: 36, bottom: chartBottomPadding(vd.granularity), containLabel: true },
+      dataZoom: xDataZoom(),
       xAxis: xAxisOpt(vd.timestamps, vd.granularity),
       yAxis: yAxisLeft("Pump Status (0/1)"),
       series: vd.pumps.map((pump, index) => ({
@@ -1194,7 +1257,7 @@
     const bucketStats = isBucketed
       ? Object.fromEntries(vd.timestamps.map((ts, index) => [ts, { label, min: minData[index], max: maxData[index] }]))
       : null;
-    const thresholdSeries = metricKey === "flow" ? permitThresholdSeries(vd.timestamps, 0) : [];
+    const thresholdSeries = metricReferenceSeries(metricKey, vd.timestamps, 0);
     const legendNames = [isBucketed ? `${label} Mean` : label];
     if (maxData) legendNames.push(`${label} Max`);
     thresholdSeries.forEach(series => legendNames.push(series.name));
@@ -1204,10 +1267,19 @@
       tooltip: tooltip({
         granularity: vd.granularity,
         bucketStats,
-        hiddenSeries: [THRESHOLD_75_NAME, THRESHOLD_90_NAME],
+        hiddenSeries: [THRESHOLD_75_NAME, THRESHOLD_90_NAME, CRITICAL_WWL_NAME],
       }),
-      legend: legend(legendNames),
+      legend: {
+        ...legend(legendNames),
+        selected: Object.fromEntries(
+          legendNames.map(name => [
+            name,
+            isLegendActive(name, name === CRITICAL_WWL_NAME ? true : undefined),
+          ])
+        ),
+      },
       grid: { left: 70, right: 20, top: 36, bottom: chartBottomPadding(vd.granularity), containLabel: true },
+      dataZoom: xDataZoom(),
       xAxis: xAxisOpt(vd.timestamps, vd.granularity),
       yAxis: { ...yAxisLeft(label), min: undefined },
       series: [
@@ -1327,7 +1399,7 @@
     function render() {
       container.innerHTML = "";
       items.forEach(({ name, color, label }) => {
-        const active = isLegendActive(name, false);
+        const active = isLegendActive(name, name === CRITICAL_WWL_NAME ? true : false);
         const button = document.createElement("button");
         button.type = "button";
         button.style.cssText = [
@@ -1356,7 +1428,7 @@
         button.addEventListener("mouseleave", () => { button.style.opacity = "1"; });
         button.addEventListener("click", () => {
           if (!legendState) legendState = {};
-          legendState[name] = !isLegendActive(name, false);
+          legendState[name] = !isLegendActive(name, name === CRITICAL_WWL_NAME ? true : false);
           chart.dispatchAction({ type: "legendToggleSelect", name });
           render();
         });
@@ -1393,6 +1465,7 @@
       backgroundColor: "transparent",
       tooltip: tooltip({ granularity }),
       grid: { left: 70, right: 20, top: 16, bottom: chartBottomPadding(vd.granularity), containLabel: true },
+      dataZoom: xDataZoom(),
       xAxis: xAxisOpt(vd.timestamps, granularity),
       yAxis: { ...yAxisLeft("Rainfall, in"), inverse: true },
       series: [{
@@ -1612,6 +1685,18 @@
     const wwlChart = initChart("chart-wwl", "wwtp");
     if (wwlChart) {
       wwlChart.setOption(makeMixedComboOption(vd, "wwl", "WWL, ft", WWL_COLOR, WWL_MAX_COLOR, overlayRain));
+      if (document.getElementById("chart-wwl-thresholds") && criticalWwlValue() != null) {
+        buildThresholdKey("chart-wwl-thresholds", [
+          { name: CRITICAL_WWL_NAME, color: CRITICAL_WWL_COLOR, label: criticalWwlLabel() },
+        ], wwlChart);
+      }
+      wwlChart.on("legendselectchanged", () => {
+        if (document.getElementById("chart-wwl-thresholds") && criticalWwlValue() != null) {
+          buildThresholdKey("chart-wwl-thresholds", [
+            { name: CRITICAL_WWL_NAME, color: CRITICAL_WWL_COLOR, label: criticalWwlLabel() },
+          ], wwlChart);
+        }
+      });
     }
   }
 

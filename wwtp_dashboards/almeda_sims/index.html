@@ -234,6 +234,7 @@
       </div>
       <div class="chart-panel">
         <div class="chart-panel-title">Pumps Status vs. Wet Well Level, ft</div>
+        <div id="chart-wwl-thresholds" class="chart-corner-key"></div>
         <div id="chart-wwl" class="chart-el" style="height:300px;"></div>
       </div>
     </div>
@@ -276,6 +277,10 @@
           { id: 380, label: "Sims Bayou @ Hiram-Clarke Road" },
           { id: 360, label: "Sims Bayou @ Martin Luther King Road" },
         ],
+      },
+      criticalWwl: {
+        east: 44.0,
+        west: 40.0,
       },
       permit: { aaf: 20.0 },
     };

@@ -36,6 +36,8 @@ PLANT_SLUGS = {
     "0250": ("keegans_bayou",   "Keegan's Bayou WWTP"),
     "0145": ("northwest",       "Northwest WWTP"),
     "0171": ("sagemont",        "Sagemont WWTP"),
+    "0183": ("sims_bayou",      "Sims Bayou WWTP"),
+    "0283": ("sims_bayou_south","Sims Bayou-South WWTP"),
 }
 
 def safe(v):

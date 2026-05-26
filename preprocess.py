@@ -21,9 +21,9 @@ import pandas as pd
 import pyarrow.parquet as pq
 
 # ── Config ────────────────────────────────────────────────────────────────────
-LOCAL_DIR  = Path("/tmp")
+LOCAL_DIR  = Path(r"E:\published\scada\summaries\archived\wwtp_wwl_pumpstatus_flow_consolidated\wwtp_flow_wwl_pumps_corrected")
 OUTPUT_BASE = Path("wwtp_dashboards")
-USE_S3     = True
+USE_S3     = False
 S3_BUCKET  = "aventdtlkps3stg01"
 S3_PREFIX  = "published/scada/summaries/archived/wwtp_wwl_pumpstatus_flow_consolidated/wwtp_flow_wwl_pumps_corrected"
 
@@ -283,7 +283,9 @@ def process_plant(fid, plant_name, slug, pump_file_fid=None, pump_tag_fid=None, 
     # ── Per-month minute JS ───────────────────────────────────────────────────
     print("  Writing monthly minute files…")
     months_present = sorted(set(
-        zip(pump_min.index.year, pump_min.index.month)
+        zip(flow_min.index.year, flow_min.index.month)
+    ) | set(
+        zip(wwl_min.index.year, wwl_min.index.month)
     ))
     for year, month in months_present:
         days = calendar.monthrange(year, month)[1]
@@ -521,8 +523,9 @@ NO_DATA_PLANTS = [
 
 
 def make_landing_page(plant_infos):
+    sorted_infos = sorted(plant_infos, key=lambda p: p['name'])
     cards = ""
-    for p in plant_infos:
+    for p in sorted_infos:
         year_range = f"{p['years'][0]}–{p['years'][-1]}" if p['years'] else "N/A"
         cards += f"""
       <a class="plant-card" href="./{p['slug']}/index.html">
@@ -554,6 +557,30 @@ def make_landing_page(plant_infos):
     }}
     .landing-header h1 {{ margin: 0; font-size: 32px; font-weight: 700; }}
     .landing-header p  {{ margin: 8px 0 0; color: var(--muted); font-size: 15px; }}
+    .landing-tabs {{
+      display: flex; gap: 6px;
+      padding: 14px 32px 0;
+      border-bottom: 1px solid rgba(122,156,199,0.12);
+    }}
+    .landing-tab {{
+      padding: 8px 20px; border-radius: 8px 8px 0 0;
+      border: 1px solid transparent; border-bottom: none;
+      background: transparent; color: var(--muted);
+      font: inherit; font-size: 14px; font-weight: 600;
+      cursor: pointer; transition: color 0.15s, background 0.15s;
+    }}
+    .landing-tab:hover {{ color: var(--text); }}
+    .landing-tab.active {{
+      background: rgba(26,39,57,0.96);
+      border-color: rgba(122,156,199,0.18);
+      color: var(--text);
+    }}
+    .landing-pane {{ display: none; }}
+    .landing-pane.active {{ display: block; }}
+    .completeness-frame {{
+      width: 100%; height: calc(100vh - 140px);
+      border: none; display: block;
+    }}
     .plant-grid {{
       display: grid;
       grid-template-columns: repeat(auto-fill, minmax(260px, 1fr));
@@ -607,6 +634,13 @@ def make_landing_page(plant_infos):
     <h1>Houston WWTP Dashboards</h1>
     <p>SCADA Historical · WWLevel, Effluent Flow &amp; Pump Status</p>
   </div>
+
+  <div class="landing-tabs">
+    <button class="landing-tab active" onclick="showTab('plants', this)">Plants</button>
+    <button class="landing-tab" onclick="showTab('completeness', this)">Data Completeness</button>
+  </div>
+
+  <div id="tab-plants" class="landing-pane active">
   <div class="plant-grid">{cards}
   </div>
   <div class="no-data-section">
@@ -614,10 +648,24 @@ def make_landing_page(plant_infos):
     <div class="plant-grid" style="padding:0;">{no_data_cards}
     </div>
   </div>
+  </div>
+
+  <div id="tab-completeness" class="landing-pane">
+    <iframe class="completeness-frame" src="../../completeness_report.html"></iframe>
+  </div>
+
+  <script>
+    function showTab(name, btn) {{
+      document.querySelectorAll('.landing-pane').forEach(function(p) {{ p.classList.remove('active'); }});
+      document.querySelectorAll('.landing-tab').forEach(function(b) {{ b.classList.remove('active'); }});
+      document.getElementById('tab-' + name).classList.add('active');
+      btn.classList.add('active');
+    }}
+  </script>
 </body>
 </html>
 """
-    with open(OUTPUT_BASE / "index.html", "w") as f:
+    with open(OUTPUT_BASE / "index.html", "w", encoding="utf-8") as f:
         f.write(html)
 
 

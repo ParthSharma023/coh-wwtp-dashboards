@@ -20,6 +20,8 @@
   const THRESHOLD_75_COLOR = "#f0bd4e";
   const THRESHOLD_90_COLOR = "#ff9a76";
   const CRITICAL_WWL_NAME = "Critical WWL";
+  const DAILY_AVG_NAME = "Flow Daily Avg";
+  const DAILY_AVG_COLOR = "#7dd3fc";
   const CRITICAL_WWL_COLOR = "#f48adf";
   const AXIS_COLOR = "rgba(180,192,208,0.45)";
   const SPLIT_COLOR = "rgba(180,192,208,0.07)";
@@ -37,7 +39,7 @@
   let selectedRainGauge = null;
   let selectedSide = PLANT_CONFIG.pumpGroups ? "east" : null;
 
-  const sel = { years: [], months: [], days: [], weeks: [], gauges: [], includeRain: false };
+  const sel = { years: [], months: [], days: [], weeks: [], gauges: [], includeRain: false, dateFrom: null, dateTo: null };
   let msYear = null;
   let msMonth = null;
   let msDay = null;
@@ -187,6 +189,7 @@
     : (!hasRain() || isMultiGauge() || sel.gauges.includes(PLANT_CONFIG.rain.gauge));
   const showRainOverlay = () => hasRain() && sel.includeRain;
   const hasSingleYear = () => sel.years.length === 1;
+  const hasCustomRange = () => !!(sel.dateFrom && sel.dateTo && sel.dateFrom <= sel.dateTo);
 
   function isoWeek(ts) {
     const d = new Date(ts.length === 10 ? ts + "T00:00" : ts.replace(" ", "T"));
@@ -208,15 +211,18 @@
     };
   }
 
-  function fmtLabel(ts, granularity) {
+  function fmtLabel(ts, granularity, showYear) {
+    const year = ts.substring(0, 4);
     const month = +ts.substring(5, 7) - 1;
     const day = +ts.substring(8, 10);
-    if (granularity === "daily") return `${MO[month]} ${day}`;
-    return `${MO[month]} ${day} ${ts.substring(11, 16)}`;
+    if (granularity === "daily") return showYear ? `${MO[month]} ${day} ${year}` : `${MO[month]} ${day}`;
+    return showYear
+      ? `${MO[month]} ${day} ${year} ${ts.substring(11, 16)}`
+      : `${MO[month]} ${day} ${ts.substring(11, 16)}`;
   }
 
   function fmtAxisValue(value, granularity) {
-    if (typeof value === "string") return fmtLabel(value, granularity || "hourly");
+    if (typeof value === "string") return fmtLabel(value, granularity || "hourly", true);
     return String(value);
   }
 
@@ -382,7 +388,7 @@
       populateMonths();
       updateDayOptions([], [], false);
       populateWeeks([]);
-      renderActive();
+      await refreshActiveView();
     } catch (e) {
       setStatus("No data for selected years");
     } finally {
@@ -489,7 +495,16 @@
     if (el) el.style.display = "none";
   }
 
+  function customRangeDays() {
+    if (!hasCustomRange()) return 0;
+    return Math.round((new Date(sel.dateTo) - new Date(sel.dateFrom)) / 86400000) + 1;
+  }
+
   function getResolutionMode() {
+    if (hasCustomRange()) {
+      if (hasSingleYear() && customRangeDays() <= 31) return "minute";
+      return "daily";
+    }
     if (hasSingleYear() && sel.days.length && sel.months.length) return "minute";
     if (hasSingleYear() && sel.weeks.length) return "minute";
     if (sel.months.length) return "hourly";
@@ -499,6 +514,16 @@
   function selectedMinuteKeys() {
     if (!hasSingleYear() || !yearData) return [];
     const year = sel.years[0];
+
+    if (hasCustomRange()) {
+      const fromMonth = parseInt(sel.dateFrom.substring(5, 7));
+      const toMonth = parseInt(sel.dateTo.substring(5, 7));
+      const keys = [];
+      for (let m = fromMonth; m <= toMonth; m++) {
+        keys.push(`${year}_${String(m).padStart(2, "0")}`);
+      }
+      return keys;
+    }
 
     if (sel.days.length) {
       if (!sel.months.length) return [];
@@ -552,15 +577,34 @@
   }
 
   function filterHourlySlice(src) {
+    if (hasCustomRange()) {
+      return filterSeriesSlice(src, ts => {
+        const date = ts.substring(0, 10);
+        return date >= sel.dateFrom && date <= sel.dateTo;
+      });
+    }
     return filterSeriesSlice(src, ts => !sel.months.length || sel.months.includes(+ts.substring(5, 7)));
   }
 
   function filterMinuteSlice(src) {
+    if (hasCustomRange()) {
+      return filterSeriesSlice(src, ts => {
+        const date = ts.substring(0, 10);
+        return date >= sel.dateFrom && date <= sel.dateTo;
+      });
+    }
     return filterSeriesSlice(src, ts => {
       if (sel.months.length && !sel.months.includes(+ts.substring(5, 7))) return false;
       if (sel.days.length && !sel.days.includes(+ts.substring(8, 10))) return false;
       if (sel.weeks.length && !sel.weeks.includes(isoWeek(ts))) return false;
       return true;
+    });
+  }
+
+  function filterDateRangeSlice(slice) {
+    return filterSeriesSlice(slice, ts => {
+      const date = ts.substring(0, 10);
+      return (!sel.dateFrom || date >= sel.dateFrom) && (!sel.dateTo || date <= sel.dateTo);
     });
   }
 
@@ -725,21 +769,29 @@
     const resolution = getResolutionMode();
     if (resolution === "minute") {
       const minute = getMinuteViewSlice();
-      return minute ? filterActivePumps(applySideFilter(minute)) : null;
+      if (minute) return filterActivePumps(applySideFilter(minute));
+      // minute files unavailable — fall back to hourly filtered by selected days
+      return filterActivePumps(applySideFilter(filterSeriesSlice(
+        { ...filterHourlySlice(yearData), granularity: "hourly" },
+        ts => !sel.days.length || sel.days.includes(+ts.substring(8, 10))
+      )));
     }
     if (resolution === "hourly") {
       return filterActivePumps(applySideFilter({ ...filterHourlySlice(yearData), granularity: "hourly" }));
     }
-    return filterActivePumps(applySideFilter(aggregateDailySlice(yearData)));
+    const daily = aggregateDailySlice(yearData);
+    return filterActivePumps(applySideFilter(hasCustomRange() ? filterDateRangeSlice(daily) : daily));
   }
 
   function getRainViewData() {
     if (!rainYearData) return null;
 
     if (isPolygonRain()) {
-      // Daily sparse data — just month-filter the event days
-      if (!sel.months.length) return rainYearData;
-      const mask = rainYearData.timestamps.map(ts => sel.months.includes(+ts.substring(5, 7)));
+      const rangeFn = hasCustomRange()
+        ? ts => ts >= sel.dateFrom && ts <= sel.dateTo
+        : sel.months.length ? ts => sel.months.includes(+ts.substring(5, 7)) : null;
+      if (!rangeFn) return rainYearData;
+      const mask = rainYearData.timestamps.map(rangeFn);
       const fi = arr => arr ? arr.filter((_, i) => mask[i]) : null;
       return {
         ...rainYearData,
@@ -754,7 +806,14 @@
     if (resolution === "minute") {
       const keys = selectedMinuteKeys();
       const missing = keys.filter(key => !rainMinuteCache[key]);
-      if (missing.length) return null;
+      if (missing.length) {
+        // fall back to hourly rain filtered by selected days
+        return filterSeriesSlice(
+          { ...rainYearData, pumps: [], granularity: "hourly" },
+          ts => (!sel.months.length || sel.months.includes(+ts.substring(5, 7))) &&
+                (!sel.days.length || sel.days.includes(+ts.substring(8, 10)))
+        );
+      }
       const merged = mergeRainMinuteData(keys);
       if (!merged) return null;
       return {
@@ -768,9 +827,10 @@
       };
     }
 
-    const hourly = filterSeriesSlice({ ...rainYearData, pumps: [], granularity: "hourly" }, ts =>
-      !sel.months.length || sel.months.includes(+ts.substring(5, 7))
-    );
+    const hourly = filterSeriesSlice({ ...rainYearData, pumps: [], granularity: "hourly" }, ts => {
+      if (hasCustomRange()) return ts.substring(0, 10) >= sel.dateFrom && ts.substring(0, 10) <= sel.dateTo;
+      return !sel.months.length || sel.months.includes(+ts.substring(5, 7));
+    });
 
     if (resolution === "hourly") return hourly;
     return aggregateDailyRain(hourly.timestamps, hourly.rain);
@@ -862,6 +922,8 @@
   function xAxisOpt(timestamps, granularity) {
     const count = timestamps.length;
     const interval = Math.max(0, Math.floor(count / 10) - 1);
+    const multiYear = count > 0 &&
+      timestamps[0].substring(0, 4) !== timestamps[timestamps.length - 1].substring(0, 4);
     return {
       type: "category",
       data: timestamps,
@@ -870,7 +932,7 @@
         fontSize: 11,
         margin: 12,
         interval,
-        formatter: ts => fmtLabel(ts, granularity),
+        formatter: ts => fmtLabel(ts, granularity, multiYear),
         rotate: count > 200 ? 30 : 0,
       },
       axisLine: { lineStyle: { color: AXIS_COLOR } },
@@ -1131,6 +1193,28 @@
     }];
   }
 
+  function buildDailyAvgSeries(timestamps, values, yAxisIndex) {
+    const buckets = {};
+    timestamps.forEach((ts, i) => {
+      const date = ts.substring(0, 10);
+      if (!buckets[date]) buckets[date] = { sum: 0, n: 0 };
+      if (values[i] != null) { buckets[date].sum += values[i]; buckets[date].n++; }
+    });
+    const lookup = {};
+    Object.entries(buckets).forEach(([d, { sum, n }]) => { lookup[d] = n ? sum / n : null; });
+    return {
+      name: DAILY_AVG_NAME,
+      type: "line",
+      yAxisIndex,
+      data: timestamps.map(ts => lookup[ts.substring(0, 10)]),
+      step: "start",
+      symbol: "none",
+      lineStyle: { color: DAILY_AVG_COLOR, width: 1.8, opacity: 0.9 },
+      itemStyle: { color: DAILY_AVG_COLOR },
+      z: 8,
+    };
+  }
+
   function metricReferenceSeries(metricKey, timestamps, yAxisIndex) {
     if (metricKey === "flow") return permitThresholdSeries(timestamps, yAxisIndex);
     if (metricKey === "wwl") return criticalWwlSeries(timestamps, yAxisIndex);
@@ -1147,10 +1231,13 @@
       ? Object.fromEntries(vd.timestamps.map((ts, index) => [ts, { label: metricLabel, min: minData[index], max: maxData[index] }]))
       : null;
     const thresholdSeries = metricReferenceSeries(metricKey, vd.timestamps, 1);
+    const showDailyAvg = metricKey === "flow" && vd.granularity === "hourly";
+    const dailyAvgSer = showDailyAvg ? [buildDailyAvgSeries(vd.timestamps, mainData, 1)] : [];
     const legendNames = [...vd.pumps];
     if (rain) legendNames.push("Rain, in");
     legendNames.push(isBucketed ? `${metricLabel} Mean` : metricLabel);
     if (maxData) legendNames.push(`${metricLabel} Max`);
+    if (showDailyAvg) legendNames.push(DAILY_AVG_NAME);
     thresholdSeries.forEach(series => legendNames.push(series.name));
     const rainMax = rain
       ? Math.max(...rain.data.filter(v => v != null && v > 0), 0.1)
@@ -1161,7 +1248,7 @@
     const usePillLegend = !!document.getElementById("chart-flow-legend");
     const legendSelected = {};
     legendNames.forEach(n => {
-      const defaultActive = usePillLegend && (n === THRESHOLD_75_NAME || n === THRESHOLD_90_NAME) ? false : undefined;
+      const defaultActive = usePillLegend && (n === THRESHOLD_75_NAME || n === THRESHOLD_90_NAME || n === DAILY_AVG_NAME) ? false : undefined;
       legendSelected[n] = isLegendActive(n, defaultActive);
     });
 
@@ -1201,6 +1288,7 @@
           z: 4,
         }] : []),
         ...thresholdSeries,
+        ...dailyAvgSer,
         {
           name: isBucketed ? `${metricLabel} Mean` : metricLabel,
           type: "line",
@@ -1258,8 +1346,11 @@
       ? Object.fromEntries(vd.timestamps.map((ts, index) => [ts, { label, min: minData[index], max: maxData[index] }]))
       : null;
     const thresholdSeries = metricReferenceSeries(metricKey, vd.timestamps, 0);
+    const showDailyAvg = metricKey === "flow" && vd.granularity === "hourly";
+    const dailyAvgSer = showDailyAvg ? [buildDailyAvgSeries(vd.timestamps, mainData, 0)] : [];
     const legendNames = [isBucketed ? `${label} Mean` : label];
     if (maxData) legendNames.push(`${label} Max`);
+    if (showDailyAvg) legendNames.push(DAILY_AVG_NAME);
     thresholdSeries.forEach(series => legendNames.push(series.name));
 
     return {
@@ -1284,6 +1375,7 @@
       yAxis: { ...yAxisLeft(label), min: undefined },
       series: [
         ...thresholdSeries,
+        ...dailyAvgSer,
         {
           name: isBucketed ? `${label} Mean` : label,
           type: "line",
@@ -1651,12 +1743,13 @@
 
       if (document.getElementById("chart-flow-legend")) {
         const isBucketed = !!vd.flow_mean;
+        const granLabel = vd.granularity === "minute" ? "Flow 1-min" : vd.granularity === "daily" ? "Flow Daily" : "Flow Hourly";
         const pillItems = [
           ...vd.pumps.map(pump => ({ name: pump, color: stablePumpColor(pump) })),
           ...(overlayRain ? [{ name: "Rain, in", color: RAIN_COLOR }] : []),
-          { name: isBucketed ? "Flow, MGD Mean" : "Flow, MGD", color: FLOW_COLOR,
-            label: isBucketed ? "Flow Mean" : "Flow, MGD" },
+          { name: isBucketed ? "Flow, MGD Mean" : "Flow, MGD", color: FLOW_COLOR, label: granLabel },
           ...(isBucketed ? [{ name: "Flow, MGD Max", color: FLOW_MAX_COLOR, label: "Flow Max" }] : []),
+          ...(vd.granularity === "hourly" ? [{ name: DAILY_AVG_NAME, color: DAILY_AVG_COLOR, label: "Daily Avg" }] : []),
         ];
         buildPillLegend("chart-flow-legend", pillItems, flowChart);
       }
@@ -1820,7 +1913,7 @@
     const detail = await preloadSelectedDetailData();
     setLoading(false);
     if (detail.failures.length) {
-      setStatus("Minute data unavailable for the selected period.");
+      setStatus("5-min data unavailable for this period — showing hourly.");
     }
     renderActive();
   }
@@ -1840,6 +1933,7 @@
     }
 
     msYear = createMultiSelect("ms-year", "All Years", async years => {
+      if (hasCustomRange()) return;
       sel.years = years;
       minuteCache = {};
       rainMinuteCache = {};
@@ -1847,6 +1941,7 @@
     }, { showAll: true });
 
     msMonth = createMultiSelect("ms-month", "All Months", async months => {
+      if (hasCustomRange()) return;
       sel.months = months;
       sel.days = [];
       sel.weeks = [];
@@ -1858,11 +1953,13 @@
     }, { showAll: true });
 
     msDay = createMultiSelect("ms-day", "All Days", async days => {
+      if (hasCustomRange()) return;
       sel.days = days;
       await refreshActiveView();
     }, { showAll: true });
 
     msWeek = createMultiSelect("ms-week", "All Weeks", async weeks => {
+      if (hasCustomRange()) return;
       sel.weeks = weeks;
       sel.days = [];
       if (msDay) msDay.clear();
@@ -1955,19 +2052,112 @@
       });
     });
 
-    const resetBtn = document.getElementById("btn-reset");
-    if (resetBtn) {
-      resetBtn.addEventListener("click", async () => {
+    // --- Custom date range UI (injected dynamically) ---
+    const filterControls = document.querySelector(".filter-controls");
+    if (filterControls) {
+      const rangeStyle = document.createElement("style");
+      rangeStyle.textContent = [
+        ".range-sep{width:1px;height:22px;background:rgba(122,156,199,0.2);align-self:center;margin:0 4px;flex-shrink:0}",
+        ".range-label{display:flex;align-items:center;gap:8px;color:var(--muted);font-size:14px;font-weight:600}",
+        ".range-input{height:36px;border-radius:8px;border:1px solid rgba(108,143,186,0.36);background:#102032;color:var(--text);padding:0 8px;font:inherit;font-size:13px;color-scheme:dark;min-width:120px}",
+        ".range-input:focus{outline:none;border-color:rgba(108,143,186,0.7)}",
+        ".filter-controls.range-active>label:not(.range-label){opacity:0.4;pointer-events:none}",
+        ".filter-controls.range-active>.multi-select{opacity:0.4;pointer-events:none}",
+      ].join("");
+      document.head.appendChild(rangeStyle);
+
+      const sepEl = document.createElement("div");
+      sepEl.className = "range-sep";
+
+      const fromLabel = document.createElement("label");
+      fromLabel.className = "range-label";
+      fromLabel.textContent = "From ";
+      const fromInput = document.createElement("input");
+      fromInput.type = "date";
+      fromInput.id = "inp-date-from";
+      fromInput.className = "range-input";
+      fromLabel.appendChild(fromInput);
+
+      const toLabel = document.createElement("label");
+      toLabel.className = "range-label";
+      toLabel.textContent = "To ";
+      const toInput = document.createElement("input");
+      toInput.type = "date";
+      toInput.id = "inp-date-to";
+      toInput.className = "range-input";
+      toLabel.appendChild(toInput);
+
+      const minYear = Math.min(...meta.years);
+      const maxYear = Math.max(...meta.years);
+      [fromInput, toInput].forEach(inp => {
+        inp.min = `${minYear}-01-01`;
+        inp.max = `${maxYear}-12-31`;
+      });
+
+      const existingReset = filterControls.querySelector("#btn-reset");
+      const insertBefore = existingReset || null;
+      filterControls.insertBefore(sepEl, insertBefore);
+      filterControls.insertBefore(fromLabel, insertBefore);
+      filterControls.insertBefore(toLabel, insertBefore);
+
+      async function applyDateRange() {
+        if (!hasCustomRange()) return;
+        const fromYear = parseInt(sel.dateFrom.substring(0, 4));
+        const toYear = parseInt(sel.dateTo.substring(0, 4));
+        const years = [];
+        for (let y = fromYear; y <= toYear; y++) {
+          if (meta.years.includes(y)) years.push(y);
+        }
+        if (!years.length) return;
+        filterControls.classList.add("range-active");
+        sel.years = years;
+        msYear.setSelected(years);
         sel.months = [];
         sel.days = [];
         sel.weeks = [];
         if (msMonth) msMonth.clear();
         if (msDay) msDay.clear();
         if (msWeek) msWeek.clear();
-        updateDayOptions([], [], false);
-        populateWeeks([]);
-        await refreshActiveView();
+        minuteCache = {};
+        rainMinuteCache = {};
+        await loadYears(years);
+      }
+
+      function clearDateRange() {
+        sel.dateFrom = null;
+        sel.dateTo = null;
+        fromInput.value = "";
+        toInput.value = "";
+        filterControls.classList.remove("range-active");
+      }
+
+      fromInput.addEventListener("change", async () => {
+        sel.dateFrom = fromInput.value || null;
+        if (hasCustomRange()) await applyDateRange();
+        else if (!sel.dateFrom) filterControls.classList.remove("range-active");
       });
+
+      toInput.addEventListener("change", async () => {
+        sel.dateTo = toInput.value || null;
+        if (hasCustomRange()) await applyDateRange();
+        else if (!sel.dateTo) filterControls.classList.remove("range-active");
+      });
+
+      const resetBtn = document.getElementById("btn-reset");
+      if (resetBtn) {
+        resetBtn.addEventListener("click", async () => {
+          clearDateRange();
+          sel.months = [];
+          sel.days = [];
+          sel.weeks = [];
+          if (msMonth) msMonth.clear();
+          if (msDay) msDay.clear();
+          if (msWeek) msWeek.clear();
+          updateDayOptions([], [], false);
+          populateWeeks([]);
+          await refreshActiveView();
+        });
+      }
     }
 
     document.querySelectorAll(".subtab[data-tab]").forEach(btn => {

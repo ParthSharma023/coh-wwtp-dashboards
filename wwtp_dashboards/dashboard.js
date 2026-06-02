@@ -8,8 +8,8 @@
   /* ── colour constants ───────────────────────────────────────────────────── */
   const PUMP_COLORS = [
     "#5da8ff", "#66bb6a", "#e6a52e", "#d46b2d",
-    "#cf4336", "#9b7fd4", "#74c6ea", "#6fd9cb",
-    "#f4c26b", "#e89c76",
+    "#cf4336", "#9b7fd4", "#f06292", "#4dd0e1",
+    "#f4c26b", "#e89c76", "#a3be8c",
   ];
   const FLOW_COLOR         = "#f1f5fb";
   const FLOW_MAX_COLOR     = "rgba(241,245,251,0.72)";

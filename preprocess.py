@@ -298,17 +298,14 @@ def process_plant(fid, plant_name, slug, pump_file_fid=None, pump_tag_fid=None, 
         wwl_m  = wwl_min.reindex(idx)
         pump_m = pump_min.reindex(idx)
 
-        active = [
-            p for p in pump_m.columns
-            if pump_m[p].notna().any() and (pump_m[p] > 0).any()
-        ]
+        all_pumps = [p for p in pump_m.columns if pump_m[p].notna().any()]
 
         out = {
-            "year": year, "month": month, "pumps": active,
+            "year": year, "month": month, "pumps": all_pumps,
             "timestamps": [ts.strftime("%Y-%m-%d %H:%M") for ts in idx],
             "flow": [safe(v) for v in flow_m.values],
             "wwl":  [safe(v) for v in wwl_m.values],
-            "pump_status": {p: [safe(v) for v in pump_m[p].values] for p in active},
+            "pump_status": {p: [safe(v) for v in pump_m[p].values] for p in all_pumps},
         }
         if ew:
             out["wwl_east"] = [safe(v) for v in wwl_east_min.reindex(idx).values]
@@ -651,7 +648,7 @@ def make_landing_page(plant_infos):
   </div>
 
   <div id="tab-completeness" class="landing-pane">
-    <iframe class="completeness-frame" src="../../completeness_report.html"></iframe>
+    <iframe class="completeness-frame" src="./completeness_report.html"></iframe>
   </div>
 
   <script>
